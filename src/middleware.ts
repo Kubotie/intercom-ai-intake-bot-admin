@@ -13,6 +13,11 @@ export function middleware(req: NextRequest) {
     return new NextResponse("Forbidden", { status: 403 });
   }
 
+  // Intercom webhook は外部サービスからの POST なので Basic Auth をスキップ
+  if (req.nextUrl.pathname === "/api/intercom/webhook") {
+    return NextResponse.next();
+  }
+
   // ADMIN_PASSWORD が未設定の場合はローカル開発とみなして通過
   const password = process.env.ADMIN_PASSWORD;
   if (!password) return NextResponse.next();

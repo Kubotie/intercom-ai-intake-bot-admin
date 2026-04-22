@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Users, Plus, CheckCircle2, Bot, RefreshCw, Trash2 } from "lucide-react";
+import { Users, Plus, CheckCircle2, Bot, RefreshCw, Trash2, Pencil, X } from "lucide-react";
 import type { Concierge } from "@/lib/nocodb";
 
 const EMPTY_FORM = {
@@ -16,7 +16,25 @@ const EMPTY_FORM = {
   source_priority_profile_key: "",
   notes: "",
   is_test_only: false,
+  is_main: false,
 };
+
+type FormState = typeof EMPTY_FORM;
+
+function conciergeToForm(c: Concierge): FormState {
+  return {
+    display_name:                c.display_name ?? "",
+    description:                 c.description ?? "",
+    persona_label:               c.persona_label ?? "",
+    intercom_admin_id:           c.intercom_admin_id ?? "",
+    policy_set_key:              c.policy_set_key ?? "",
+    skill_profile_key:           c.skill_profile_key ?? "",
+    source_priority_profile_key: c.source_priority_profile_key ?? "",
+    notes:                       c.notes ?? "",
+    is_test_only:                c.is_test_only ?? false,
+    is_main:                     c.is_main ?? false,
+  };
+}
 
 function getStatusBadge(c: Concierge): { variant: "success" | "warning" | "muted"; label: string } {
   if (!c.is_active) return { variant: "muted", label: "inactive" };
@@ -24,14 +42,103 @@ function getStatusBadge(c: Concierge): { variant: "success" | "warning" | "muted
   return { variant: "success", label: "active" };
 }
 
+function ConciergeForm({
+  form, onChange, onSubmit, onCancel, saving, error, submitLabel,
+}: {
+  form: FormState;
+  onChange: (f: FormState) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  saving: boolean;
+  error: string | null;
+  submitLabel: string;
+}) {
+  const f = form;
+  const set = (patch: Partial<FormState>) => onChange({ ...f, ...patch });
+  const input = "w-full h-8 text-sm px-3 rounded-md border border-[var(--border)] bg-zinc-50 outline-none focus:ring-1 focus:ring-zinc-300";
+  const monoInput = input + " font-mono";
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">表示名 *</label>
+          <input value={f.display_name} onChange={e => set({ display_name: e.target.value })}
+            placeholder="例: Ptengine サポート" className={input} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">Intercom Admin ID</label>
+          <input value={f.intercom_admin_id} onChange={e => set({ intercom_admin_id: e.target.value })}
+            placeholder="例: 7654321" className={monoInput} />
+        </div>
+      </div>
+      <div>
+        <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">ペルソナラベル</label>
+        <input value={f.persona_label} onChange={e => set({ persona_label: e.target.value })}
+          placeholder="例: 丁寧・保守的" className={input} />
+      </div>
+      <div>
+        <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">説明</label>
+        <textarea value={f.description} onChange={e => set({ description: e.target.value })}
+          rows={2} placeholder="このコンシェルジュの用途・特徴"
+          className="w-full text-sm px-3 py-2 rounded-md border border-[var(--border)] bg-zinc-50 resize-none outline-none focus:ring-1 focus:ring-zinc-300" />
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">Policy Set Key</label>
+          <input value={f.policy_set_key} onChange={e => set({ policy_set_key: e.target.value })}
+            placeholder="例: default" className={monoInput} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">Skill Profile Key</label>
+          <input value={f.skill_profile_key} onChange={e => set({ skill_profile_key: e.target.value })}
+            placeholder="例: default" className={monoInput} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">Source Priority Key</label>
+          <input value={f.source_priority_profile_key} onChange={e => set({ source_priority_profile_key: e.target.value })}
+            placeholder="例: default" className={monoInput} />
+        </div>
+      </div>
+      <div>
+        <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">メモ（任意）</label>
+        <input value={f.notes} onChange={e => set({ notes: e.target.value })}
+          placeholder="内部メモ" className={input} />
+      </div>
+      <div className="flex gap-4">
+        <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)] cursor-pointer">
+          <input type="checkbox" checked={f.is_test_only} onChange={e => set({ is_test_only: e.target.checked })}
+            className="rounded border-[var(--border)]" />
+          テスト専用
+        </label>
+        <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)] cursor-pointer">
+          <input type="checkbox" checked={f.is_main} onChange={e => set({ is_main: e.target.checked })}
+            className="rounded border-[var(--border)]" />
+          メイン（デフォルト）
+        </label>
+      </div>
+      {error && (
+        <div className="p-2.5 rounded-md border border-red-200 bg-red-50 text-xs text-red-700">{error}</div>
+      )}
+      <div className="flex gap-2">
+        <Button size="sm" onClick={onSubmit} disabled={saving || !f.display_name}>
+          {saving ? "保存中…" : submitLabel}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>キャンセル</Button>
+      </div>
+    </div>
+  );
+}
+
 export default function ConciergePage() {
   const [concierges, setConcierges] = useState<Concierge[]>([]);
   const [loading, setLoading]       = useState(true);
-  const [showForm, setShowForm]     = useState(false);
-  const [saving, setSaving]         = useState(false);
-  const [form, setForm]             = useState(EMPTY_FORM);
-  const [noTable, setNoTable]       = useState(false);
-  const [saveError, setSaveError]   = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editId, setEditId]           = useState<number | null>(null);
+  const [saving, setSaving]           = useState(false);
+  const [form, setForm]               = useState(EMPTY_FORM);
+  const [noTable, setNoTable]         = useState(false);
+  const [saveError, setSaveError]     = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -47,6 +154,15 @@ export default function ConciergePage() {
 
   useEffect(() => { load(); }, []);
 
+  const startEdit = (c: Concierge) => {
+    setShowAddForm(false);
+    setEditId(c.Id);
+    setForm(conciergeToForm(c));
+    setSaveError(null);
+  };
+
+  const cancelEdit = () => { setEditId(null); setSaveError(null); };
+
   const add = async () => {
     if (!form.display_name) return;
     setSaving(true);
@@ -58,7 +174,6 @@ export default function ConciergePage() {
         body: JSON.stringify({
           ...form,
           concierge_key: `concierge_${Date.now()}`,
-          is_main: false,
           is_active: true,
         }),
       });
@@ -67,8 +182,32 @@ export default function ConciergePage() {
         setSaveError(data?.error ?? `保存失敗 (HTTP ${res.status})`);
         return;
       }
-      setShowForm(false);
+      setShowAddForm(false);
       setForm(EMPTY_FORM);
+      load();
+    } catch (e) {
+      setSaveError(`ネットワークエラー: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const save = async () => {
+    if (!form.display_name || editId == null) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await fetch("/api/concierges", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Id: editId, ...form }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setSaveError(data?.error ?? `保存失敗 (HTTP ${res.status})`);
+        return;
+      }
+      setEditId(null);
       load();
     } catch (e) {
       setSaveError(`ネットワークエラー: ${e instanceof Error ? e.message : String(e)}`);
@@ -107,7 +246,7 @@ export default function ConciergePage() {
           <Button variant="outline" size="sm" onClick={load}>
             <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
           </Button>
-          <Button size="sm" onClick={() => setShowForm(f => !f)}>
+          <Button size="sm" onClick={() => { setShowAddForm(f => !f); setEditId(null); setSaveError(null); setForm(EMPTY_FORM); }}>
             <Plus size={13} /> 追加
           </Button>
         </div>
@@ -122,72 +261,15 @@ export default function ConciergePage() {
         </div>
       )}
 
-      {showForm && (
+      {showAddForm && (
         <Card className="mb-4">
           <CardHeader><CardTitle>新しいコンシェルジュを追加</CardTitle></CardHeader>
-          <CardContent className="p-4 space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">表示名 *</label>
-                <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
-                  placeholder="例: Ptengine サポート"
-                  className="w-full h-8 text-sm px-3 rounded-md border border-[var(--border)] bg-zinc-50 outline-none focus:ring-1 focus:ring-zinc-300" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">Intercom Admin ID</label>
-                <input value={form.intercom_admin_id} onChange={e => setForm(f => ({ ...f, intercom_admin_id: e.target.value }))}
-                  placeholder="例: 7654321"
-                  className="w-full h-8 text-sm px-3 rounded-md border border-[var(--border)] bg-zinc-50 outline-none focus:ring-1 focus:ring-zinc-300 font-mono" />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">ペルソナラベル</label>
-              <input value={form.persona_label} onChange={e => setForm(f => ({ ...f, persona_label: e.target.value }))}
-                placeholder="例: 丁寧・保守的"
-                className="w-full h-8 text-sm px-3 rounded-md border border-[var(--border)] bg-zinc-50 outline-none focus:ring-1 focus:ring-zinc-300" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">説明</label>
-              <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                rows={2} placeholder="このコンシェルジュの用途・特徴"
-                className="w-full text-sm px-3 py-2 rounded-md border border-[var(--border)] bg-zinc-50 resize-none outline-none focus:ring-1 focus:ring-zinc-300" />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">Policy Set Key</label>
-                <input value={form.policy_set_key} onChange={e => setForm(f => ({ ...f, policy_set_key: e.target.value }))}
-                  placeholder="例: default"
-                  className="w-full h-8 text-sm px-3 rounded-md border border-[var(--border)] bg-zinc-50 outline-none focus:ring-1 focus:ring-zinc-300 font-mono" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">Skill Profile Key</label>
-                <input value={form.skill_profile_key} onChange={e => setForm(f => ({ ...f, skill_profile_key: e.target.value }))}
-                  placeholder="例: default"
-                  className="w-full h-8 text-sm px-3 rounded-md border border-[var(--border)] bg-zinc-50 outline-none focus:ring-1 focus:ring-zinc-300 font-mono" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">Source Priority Key</label>
-                <input value={form.source_priority_profile_key} onChange={e => setForm(f => ({ ...f, source_priority_profile_key: e.target.value }))}
-                  placeholder="例: default"
-                  className="w-full h-8 text-sm px-3 rounded-md border border-[var(--border)] bg-zinc-50 outline-none focus:ring-1 focus:ring-zinc-300 font-mono" />
-              </div>
-            </div>
-            <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)] cursor-pointer">
-              <input type="checkbox" checked={form.is_test_only} onChange={e => setForm(f => ({ ...f, is_test_only: e.target.checked }))}
-                className="rounded border-[var(--border)]" />
-              テスト専用（本番会話には使わない）
-            </label>
-            {saveError && (
-              <div className="p-2.5 rounded-md border border-red-200 bg-red-50 text-xs text-red-700">
-                {saveError}
-              </div>
-            )}
-            <div className="flex gap-2">
-              <Button size="sm" onClick={add} disabled={saving || !form.display_name}>
-                {saving ? "保存中…" : "追加する"}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => { setShowForm(false); setSaveError(null); }}>キャンセル</Button>
-            </div>
+          <CardContent className="p-0">
+            <ConciergeForm
+              form={form} onChange={setForm}
+              onSubmit={add} onCancel={() => { setShowAddForm(false); setSaveError(null); }}
+              saving={saving} error={saveError} submitLabel="追加する"
+            />
           </CardContent>
         </Card>
       )}
@@ -203,6 +285,7 @@ export default function ConciergePage() {
             ))
           : concierges.map(c => {
               const { variant, label } = getStatusBadge(c);
+              const isEditing = editId === c.Id;
               return (
                 <Card key={c.Id}>
                   <CardContent className="p-5">
@@ -219,42 +302,62 @@ export default function ConciergePage() {
                             </span>
                           )}
                           <Badge variant={variant}>{label}</Badge>
+                          <span className="text-[10px] font-mono text-[var(--text-muted)]">{c.concierge_key}</span>
                         </div>
-                        <p className="text-xs text-[var(--text-muted)] mb-3">
-                          {c.persona_label ? `[${c.persona_label}]` : ""}{c.description ? ` ${c.description}` : ""}
-                          {!c.persona_label && !c.description && "説明未設定"}
-                        </p>
-                        <div className="grid grid-cols-4 gap-3 text-xs">
-                          <div>
-                            <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Intercom Admin ID</p>
-                            <p className="text-[var(--text-secondary)] font-mono text-[10px]">{c.intercom_admin_id || "—"}</p>
+                        {!isEditing && (
+                          <>
+                            <p className="text-xs text-[var(--text-muted)] mb-3">
+                              {c.persona_label ? `[${c.persona_label}]` : ""}{c.description ? ` ${c.description}` : ""}
+                              {!c.persona_label && !c.description && "説明未設定"}
+                            </p>
+                            <div className="grid grid-cols-4 gap-3 text-xs">
+                              <div>
+                                <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Intercom Admin ID</p>
+                                <p className="text-[var(--text-secondary)] font-mono text-[10px]">{c.intercom_admin_id || "—"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Policy Set</p>
+                                <p className="text-[var(--text-secondary)] font-mono text-[10px]">{c.policy_set_key || "—"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Skill Profile</p>
+                                <p className="text-[var(--text-secondary)] font-mono text-[10px]">{c.skill_profile_key || "—"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Source Priority</p>
+                                <p className="text-[var(--text-secondary)] font-mono text-[10px]">{c.source_priority_profile_key || "—"}</p>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                        {isEditing && (
+                          <div className="mt-3 border-t border-[var(--border-subtle)] pt-3">
+                            <ConciergeForm
+                              form={form} onChange={setForm}
+                              onSubmit={save} onCancel={cancelEdit}
+                              saving={saving} error={saveError} submitLabel="保存する"
+                            />
                           </div>
-                          <div>
-                            <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Policy Set</p>
-                            <p className="text-[var(--text-secondary)] font-mono text-[10px]">{c.policy_set_key || "—"}</p>
-                          </div>
-                          <div>
-                            <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Skill Profile</p>
-                            <p className="text-[var(--text-secondary)] font-mono text-[10px]">{c.skill_profile_key || "—"}</p>
-                          </div>
-                          <div>
-                            <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Source Priority</p>
-                            <p className="text-[var(--text-secondary)] font-mono text-[10px]">{c.source_priority_profile_key || "—"}</p>
-                          </div>
-                        </div>
+                        )}
                       </div>
-                      <div className="flex gap-1 shrink-0">
-                        {!c.is_main && (
+                      {!isEditing && (
+                        <div className="flex gap-1 shrink-0">
+                          <Button variant="ghost" size="sm" onClick={() => startEdit(c)}>
+                            <Pencil size={13} />
+                          </Button>
                           <Button variant="ghost" size="sm" onClick={() => toggleActive(c)}>
                             {c.is_active ? "無効化" : "有効化"}
                           </Button>
-                        )}
-                        {!c.is_main && (
                           <Button variant="ghost" size="sm" onClick={() => remove(c.Id)}>
                             <Trash2 size={13} className="text-red-500" />
                           </Button>
-                        )}
-                      </div>
+                        </div>
+                      )}
+                      {isEditing && (
+                        <Button variant="ghost" size="sm" onClick={cancelEdit}>
+                          <X size={13} />
+                        </Button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -274,6 +377,7 @@ export default function ConciergePage() {
             複数コンシェルジュ登録・切り替えには Intercom の Bot Admin アカウントがそれぞれ必要です。
             <code>policy_set_key</code> / <code>skill_profile_key</code> / <code>source_priority_profile_key</code> は
             Bot 設定ファイル（md）のプロファイルキーと対応します。
+            <strong className="text-amber-700 ml-1">「メイン」にチェックした concierge が、target に concierge_key が未設定の場合の fallback になります。</strong>
           </p>
         </div>
       </div>

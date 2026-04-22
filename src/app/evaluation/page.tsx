@@ -84,7 +84,7 @@ export default function EvaluationPage() {
         <Table>
           <Thead>
             <tr>
-              {["日時", "メッセージ", "Intent", "Source", "評価", "理由", ""].map(h => <Th key={h}>{h}</Th>)}
+              {["日時", "メッセージ", "Intent", "Skill", "Source", "評価", "理由", ""].map(h => <Th key={h}>{h}</Th>)}
             </tr>
           </Thead>
           <Tbody>
@@ -101,6 +101,7 @@ export default function EvaluationPage() {
                     <Td className="text-xs text-[var(--text-muted)]">{formatDate(s.CreatedAt)}</Td>
                     <Td className="max-w-[200px] text-[var(--text-primary)]">{truncate(s.latest_user_message, 45)}</Td>
                     <Td>{categoryBadge(s.category)}</Td>
+                    <Td><span className="text-xs font-mono text-[var(--text-muted)]">{s.selected_skill ?? "—"}</span></Td>
                     <Td>{replySourceBadge(s.reply_source)}</Td>
                     <Td>
                       {s.evaluation === "good" && (
@@ -121,7 +122,7 @@ export default function EvaluationPage() {
                     <Td>
                       <Button variant="ghost" size="sm"
                         onClick={() => router.push(`/conversations/${s.session_uid}`)}>
-                        評価する →
+                        {s.evaluation ? "詳細 →" : "評価する →"}
                       </Button>
                     </Td>
                   </Tr>

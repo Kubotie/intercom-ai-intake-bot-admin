@@ -1065,7 +1065,7 @@ export async function processIntercomWebhook(payload) {
   });
   try {
     await replyToConversation(event.intercom_conversation_id, replyMessage, replyAdminId);
-    logger.info("reply success", { reply_source: replySource, admin_id: replyAdminId, ...ctx });
+    logger.info("reply success", { reply_source: replySource, admin_id: replyAdminId, category: session.category ?? null, concierge_key: targeting.conciergeKey ?? null, ...ctx });
 
     // handoff reply 成功 → handed_off に遷移
     if (replySource === "handoff") {
@@ -1075,6 +1075,8 @@ export async function processIntercomWebhook(payload) {
   } catch (err) {
     logger.warn("reply failed", {
       reply_source: replySource,
+      category: session.category ?? null,
+      concierge_key: targeting.conciergeKey ?? null,
       error: err?.message || String(err),
       ...ctx
     });

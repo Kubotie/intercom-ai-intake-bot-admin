@@ -1,7 +1,8 @@
-import { getSessions, getSessionStats, getConcierges, getTestTargets, getKnowledgeSources } from "@/lib/nocodb";
+import { getSessions, getSessionStats, getSessionStatsToday, getDailyStats, getConcierges, getTestTargets, getKnowledgeSources } from "@/lib/nocodb";
 import { StatCard, Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { categoryBadge, replySourceBadge } from "@/components/ui/badge";
 import { formatDate, truncate } from "@/lib/utils";
+import { TrendChart } from "./trend-chart";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -27,8 +28,10 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 export default async function OverviewPage() {
-  const [stats, recent, concierges, testTargets, knowledgeSources] = await Promise.all([
+  const [stats, today, dailyStats, recent, concierges, testTargets, knowledgeSources] = await Promise.all([
     getSessionStats(),
+    getSessionStatsToday().catch(() => ({ replies: 0, handoffs: 0, escalations: 0, skillAccepted: 0, skillRejected: 0 })),
+    getDailyStats(7).catch(() => []),
     getSessions({ limit: 10 }),
     getConcierges().catch(() => []),
     getTestTargets().catch(() => ({ list: [], pageInfo: { totalRows: 0, page: 1, pageSize: 100, isLastPage: true } })),
@@ -94,6 +97,29 @@ export default async function OverviewPage() {
           <Link href="/knowledge" className="text-[11px] text-blue-600 hover:underline">Knowledge →</Link>
         </div>
       </div>
+
+      {/* Today's monitoring */}
+      <div className="mb-2">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)]">今日の統計</h2>
+        <p className="text-xs text-[var(--text-muted)] mt-0.5">JST 0:00 以降のセッション</p>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <StatCard label="返信数"         value={today.replies.toString()} />
+        <StatCard label="Handoff"        value={today.handoffs.toString()}     accent="text-amber-600" />
+        <StatCard label="Escalation"     value={today.escalations.toString()}  accent="text-red-600" />
+        <StatCard label="Skill 採用"      value={today.skillAccepted.toString()} accent="text-blue-600" />
+        <StatCard label="Skill 不採用"    value={today.skillRejected.toString()} accent="text-zinc-500" />
+      </div>
+
+      {/* 7-day trend */}
+      {dailyStats.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader><CardTitle>7日間トレンド</CardTitle></CardHeader>
+          <CardContent>
+            <TrendChart data={dailyStats} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Category + Source breakdown */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">

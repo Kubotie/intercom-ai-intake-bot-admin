@@ -1055,7 +1055,14 @@ export async function processIntercomWebhook(payload) {
     }
   }
 
-  const replyAdminId = targeting.concierge?.intercom_admin_id || config.intercom.adminId;
+  const conciergeAdminId = targeting.concierge?.intercom_admin_id ?? null;
+  const replyAdminId = conciergeAdminId || config.intercom.adminId;
+  logger.info("reply admin resolved", {
+    concierge_intercom_admin_id: conciergeAdminId,
+    env_admin_id: config.intercom.adminId,
+    using_admin_id: replyAdminId,
+    ...ctx
+  });
   try {
     await replyToConversation(event.intercom_conversation_id, replyMessage, replyAdminId);
     logger.info("reply success", { reply_source: replySource, admin_id: replyAdminId, ...ctx });

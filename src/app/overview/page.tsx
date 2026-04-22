@@ -4,7 +4,7 @@ import { categoryBadge, replySourceBadge } from "@/components/ui/badge";
 import { formatDate, truncate } from "@/lib/utils";
 import Link from "next/link";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 const CATEGORY_LABELS: Record<string, string> = {
   experience_issue:  "体験・表示問題",

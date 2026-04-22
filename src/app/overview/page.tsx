@@ -1,4 +1,4 @@
-import { getSessions, getSessionStats } from "@/lib/nocodb";
+import { getSessions, getSessionStats, getConcierges, getTestTargets, getKnowledgeSources } from "@/lib/nocodb";
 import { StatCard, Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { categoryBadge, replySourceBadge } from "@/components/ui/badge";
 import { formatDate, truncate } from "@/lib/utils";
@@ -27,17 +27,24 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 export default async function OverviewPage() {
-  const [stats, recent] = await Promise.all([
+  const [stats, recent, concierges, testTargets, knowledgeSources] = await Promise.all([
     getSessionStats(),
     getSessions({ limit: 10 }),
+    getConcierges().catch(() => []),
+    getTestTargets().catch(() => ({ list: [], pageInfo: { totalRows: 0, page: 1, pageSize: 100, isLastPage: true } })),
+    getKnowledgeSources().catch(() => []),
   ]);
 
   const skillAdopted = (stats.byReplySource["faq_answer"] ?? 0)
     + (stats.byReplySource["help_center_answer"] ?? 0)
     + (stats.byReplySource["known_bug_match"] ?? 0);
-  const adoptRate = stats.total > 0 ? Math.round(skillAdopted / Math.min(stats.total, 200) * 100) : 0;
-  const handoffRate = stats.total > 0 ? Math.round(stats.handedOff / Math.min(stats.total, 200) * 100) : 0;
+  const adoptRate    = stats.total > 0 ? Math.round(skillAdopted / Math.min(stats.total, 200) * 100) : 0;
+  const handoffRate  = stats.total > 0 ? Math.round(stats.handedOff / Math.min(stats.total, 200) * 100) : 0;
   const escalateRate = stats.total > 0 ? Math.round(stats.escalated / Math.min(stats.total, 200) * 100) : 0;
+
+  const activeConcierges  = concierges.filter(c => c.is_active && !c.is_test_only).length;
+  const activeTestTargets = testTargets.list.filter(t => t.is_active).length;
+  const latestSync        = knowledgeSources.find(s => s.last_synced_at)?.last_synced_at ?? null;
 
   return (
     <div className="p-6 max-w-[1200px]">
@@ -48,10 +55,31 @@ export default async function OverviewPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <StatCard label="総セッション数" value={stats.total.toLocaleString()} />
-        <StatCard label="Skill 採用率" value={`${adoptRate}%`} sub={`${skillAdopted} 件`} accent="text-blue-600" />
-        <StatCard label="Handoff 率" value={`${handoffRate}%`} sub={`${stats.handedOff} 件`} accent="text-amber-600" />
-        <StatCard label="Escalation 率" value={`${escalateRate}%`} sub={`${stats.escalated} 件`} accent="text-red-600" />
+        <StatCard label="総セッション数"   value={stats.total.toLocaleString()} />
+        <StatCard label="Skill 採用率"     value={`${adoptRate}%`}    sub={`${skillAdopted} 件`}      accent="text-blue-600" />
+        <StatCard label="Handoff 率"       value={`${handoffRate}%`}  sub={`${stats.handedOff} 件`}   accent="text-amber-600" />
+        <StatCard label="Escalation 率"    value={`${escalateRate}%`} sub={`${stats.escalated} 件`}   accent="text-red-600" />
+      </div>
+
+      {/* Infra status */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="rounded-lg border border-[var(--border)] bg-white p-4">
+          <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Active Concierges</p>
+          <p className="text-2xl font-semibold text-[var(--text-primary)] tabular-nums">{activeConcierges}</p>
+          <Link href="/concierges" className="text-[11px] text-blue-600 hover:underline">管理 →</Link>
+        </div>
+        <div className="rounded-lg border border-[var(--border)] bg-white p-4">
+          <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Test Targets</p>
+          <p className="text-2xl font-semibold text-[var(--text-primary)] tabular-nums">{activeTestTargets}</p>
+          <Link href="/test-targets" className="text-[11px] text-blue-600 hover:underline">管理 →</Link>
+        </div>
+        <div className="rounded-lg border border-[var(--border)] bg-white p-4">
+          <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Knowledge Last Sync</p>
+          <p className="text-sm font-medium text-[var(--text-primary)] mt-1">
+            {latestSync ? formatDate(latestSync) : <span className="text-[var(--text-muted)]">未同期</span>}
+          </p>
+          <Link href="/knowledge" className="text-[11px] text-blue-600 hover:underline">Knowledge →</Link>
+        </div>
       </div>
 
       {/* Category + Source breakdown */}

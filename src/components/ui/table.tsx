@@ -48,9 +48,9 @@ export function Tr({ children, onClick, className }: {
   );
 }
 
-export function Td({ children, className }: { children?: React.ReactNode; className?: string }) {
+export function Td({ children, className, colSpan }: { children?: React.ReactNode; className?: string; colSpan?: number }) {
   return (
-    <td className={cn("px-4 py-3 text-[var(--text-secondary)] whitespace-nowrap", className)}>
+    <td colSpan={colSpan} className={cn("px-4 py-3 text-[var(--text-secondary)] whitespace-nowrap", className)}>
       {children}
     </td>
   );

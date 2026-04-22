@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, MessageSquare, Star, FileText,
-  GitBranch, Zap, BookOpen, Users, ScrollText, FlaskConical, Settings, Bot
+  GitBranch, Zap, BookOpen, Users, ScrollText, FlaskConical, Settings, Bot, TestTube2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +16,7 @@ const NAV = [
   { href: "/skills",         icon: Zap,             label: "Skills" },
   { href: "/knowledge",      icon: BookOpen,        label: "Knowledge" },
   { href: "/concierges",     icon: Users,           label: "Concierges" },
+  { href: "/test-targets",   icon: TestTube2,       label: "Test Targets" },
   { href: "/logs",           icon: ScrollText,      label: "Logs" },
   { href: "/sandbox",        icon: FlaskConical,    label: "Sandbox" },
 ];

@@ -2,11 +2,15 @@ const BASE = process.env.NOCODB_BASE_URL!;
 const TOKEN = process.env.NOCODB_API_TOKEN!;
 
 const TABLES = {
-  sessions:  process.env.NOCODB_SESSIONS_TABLE_ID!,
-  messages:  process.env.NOCODB_MESSAGES_TABLE_ID!,
-  slots:     process.env.NOCODB_SLOTS_TABLE_ID!,
-  chunks:    process.env.NOCODB_KNOWLEDGE_CHUNKS_TABLE_ID!,
-  issues:    process.env.NOCODB_KNOWN_ISSUES_TABLE_ID!,
+  sessions:         process.env.NOCODB_SESSIONS_TABLE_ID!,
+  messages:         process.env.NOCODB_MESSAGES_TABLE_ID!,
+  slots:            process.env.NOCODB_SLOTS_TABLE_ID!,
+  chunks:           process.env.NOCODB_KNOWLEDGE_CHUNKS_TABLE_ID!,
+  issues:           process.env.NOCODB_KNOWN_ISSUES_TABLE_ID!,
+  knowledgeSources: process.env.NOCODB_KNOWLEDGE_SOURCES_TABLE_ID ?? "",
+  concierges:       process.env.NOCODB_CONCIERGES_TABLE_ID ?? "",
+  testTargets:      process.env.NOCODB_TEST_TARGETS_TABLE_ID ?? "",
+  rolloutRules:     process.env.NOCODB_ROLLOUT_RULES_ID ?? "",
 };
 
 export type Session = {
@@ -130,6 +134,140 @@ export async function updateSessionEval(rowId: number, evaluation: string, evalR
     headers: { "xc-token": TOKEN, "Content-Type": "application/json" },
     body: JSON.stringify({ Id: rowId, evaluation, eval_reason: evalReason }),
   });
+}
+
+export type Concierge = {
+  Id: number;
+  concierge_key: string;
+  display_name: string;
+  description: string | null;
+  intercom_admin_id: string | null;
+  persona_label: string | null;
+  policy_set_key: string | null;
+  skill_profile_key: string | null;
+  source_priority_profile_key: string | null;
+  is_active: boolean;
+  is_main: boolean;
+  is_test_only: boolean;
+  notes: string | null;
+  CreatedAt: string;
+  UpdatedAt: string;
+};
+
+export type TestTarget = {
+  Id: number;
+  target_type: string;
+  target_value: string;
+  label: string | null;
+  environment: string | null;
+  concierge_key: string | null;
+  is_active: boolean;
+  notes: string | null;
+  CreatedAt: string;
+  UpdatedAt: string;
+};
+
+export type KnowledgeSource = {
+  Id: number;
+  source_key: string | null;
+  source_name: string;
+  source_type: string;
+  description: string | null;
+  source_url_or_path: string | null;
+  is_active: boolean;
+  sync_enabled: boolean;
+  freshness_status: string | null;
+  last_synced_at: string | null;
+  chunk_count: number | null;
+  published_chunk_count: number | null;
+  notes: string | null;
+  CreatedAt: string;
+  UpdatedAt: string;
+};
+
+export type RolloutRule = {
+  Id: number;
+  rule_name: string;
+  priority: number;
+  environment: string | null;
+  condition_json: string | null;
+  assigned_concierge_key: string | null;
+  mode: string;
+  is_active: boolean;
+  notes: string | null;
+  CreatedAt: string;
+  UpdatedAt: string;
+};
+
+export async function getConcierges(): Promise<Concierge[]> {
+  if (!TABLES.concierges) return [];
+  const res = await ncFetch<Concierge>(TABLES.concierges, { limit: 100, sort: "-is_main" });
+  return res.list;
+}
+
+export async function createConcierge(data: Partial<Concierge>): Promise<void> {
+  await fetch(`${BASE}/api/v2/tables/${TABLES.concierges}/records`, {
+    method: "POST",
+    headers: { "xc-token": TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateConcierge(rowId: number, data: Partial<Concierge>): Promise<void> {
+  await fetch(`${BASE}/api/v2/tables/${TABLES.concierges}/records`, {
+    method: "PATCH",
+    headers: { "xc-token": TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify({ Id: rowId, ...data }),
+  });
+}
+
+export async function deleteConcierge(rowId: number): Promise<void> {
+  await fetch(`${BASE}/api/v2/tables/${TABLES.concierges}/records`, {
+    method: "DELETE",
+    headers: { "xc-token": TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify({ Id: rowId }),
+  });
+}
+
+export async function getTestTargets(): Promise<ListResponse<TestTarget>> {
+  if (!TABLES.testTargets) return { list: [], pageInfo: { totalRows: 0, page: 1, pageSize: 100, isLastPage: true } };
+  return ncFetch<TestTarget>(TABLES.testTargets, { limit: 100, sort: "-CreatedAt" });
+}
+
+export async function createTestTarget(data: Partial<TestTarget>): Promise<void> {
+  await fetch(`${BASE}/api/v2/tables/${TABLES.testTargets}/records`, {
+    method: "POST",
+    headers: { "xc-token": TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateTestTarget(rowId: number, data: Partial<TestTarget>): Promise<void> {
+  await fetch(`${BASE}/api/v2/tables/${TABLES.testTargets}/records`, {
+    method: "PATCH",
+    headers: { "xc-token": TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify({ Id: rowId, ...data }),
+  });
+}
+
+export async function deleteTestTarget(rowId: number): Promise<void> {
+  await fetch(`${BASE}/api/v2/tables/${TABLES.testTargets}/records`, {
+    method: "DELETE",
+    headers: { "xc-token": TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify({ Id: rowId }),
+  });
+}
+
+export async function getKnowledgeSources(): Promise<KnowledgeSource[]> {
+  if (!TABLES.knowledgeSources) return [];
+  const res = await ncFetch<KnowledgeSource>(TABLES.knowledgeSources, { limit: 50, sort: "-last_synced_at" });
+  return res.list;
+}
+
+export async function getRolloutRules(): Promise<RolloutRule[]> {
+  if (!TABLES.rolloutRules) return [];
+  const res = await ncFetch<RolloutRule>(TABLES.rolloutRules, { limit: 100, sort: "priority" });
+  return res.list;
 }
 
 export async function getSessionStats(): Promise<{

@@ -5,19 +5,36 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, Thead, Th, Tbody, Tr, Td } from "@/components/ui/table";
 import { formatDate, truncate } from "@/lib/utils";
-import type { KnowledgeChunk } from "@/lib/nocodb";
-import { RefreshCw, ChevronLeft, ChevronRight, BookOpen, Database } from "lucide-react";
+import type { KnowledgeChunk, KnowledgeSource } from "@/lib/nocodb";
+import { RefreshCw, ChevronLeft, ChevronRight, BookOpen, Database, Clock } from "lucide-react";
 
 const SOURCE_TYPES = ["", "notion_faq", "help_center", "known_issue", "notion_cse"];
 
 export default function KnowledgePage() {
-  const [chunks, setChunks] = useState<KnowledgeChunk[]>([]);
-  const [total, setTotal]   = useState(0);
-  const [page, setPage]     = useState(0);
+  const [chunks, setChunks]       = useState<KnowledgeChunk[]>([]);
+  const [total, setTotal]         = useState(0);
+  const [page, setPage]           = useState(0);
   const [sourceType, setSourceType] = useState("");
   const [pubOnly, setPubOnly]       = useState(false);
   const [loading, setLoading]       = useState(true);
+  const [sources, setSources]       = useState<KnowledgeSource[]>([]);
+  const [sourceCounts, setSourceCounts] = useState<Record<string, number>>({});
   const PAGE_SIZE = 50;
+
+  const loadSources = async () => {
+    const [srcRes, countResults] = await Promise.all([
+      fetch("/api/knowledge-sources").then(r => r.json()),
+      Promise.all(
+        SOURCE_TYPES.slice(1).map(t =>
+          fetch(`/api/chunks?limit=1&where=(source_type,eq,${t})`)
+            .then(r => r.json())
+            .then(d => [t, d.pageInfo?.totalRows ?? 0] as [string, number])
+        )
+      ),
+    ]);
+    setSources(srcRes.list ?? []);
+    setSourceCounts(Object.fromEntries(countResults));
+  };
 
   const load = async () => {
     setLoading(true);
@@ -35,14 +52,23 @@ export default function KnowledgePage() {
     setLoading(false);
   };
 
+  useEffect(() => { loadSources(); }, []);
   useEffect(() => { setPage(0); }, [sourceType, pubOnly]);
   useEffect(() => { load(); }, [page, sourceType, pubOnly]);
+
+  const getSource = (type: string) => sources.find(s => s.source_type === type);
 
   const sourceColor: Record<string, string> = {
     notion_faq:  "purple",
     help_center: "info",
     known_issue: "warning",
     notion_cse:  "muted",
+  };
+
+  const freshnessColor = (status: string | null) => {
+    if (status === "fresh") return "text-emerald-600";
+    if (status === "stale") return "text-amber-600";
+    return "text-zinc-400";
   };
 
   return (
@@ -54,7 +80,7 @@ export default function KnowledgePage() {
             ナレッジチャンク管理 — 全 {total.toLocaleString()} 件
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={load}>
+        <Button variant="outline" size="sm" onClick={() => { loadSources(); load(); }}>
           <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> 更新
         </Button>
       </div>
@@ -66,18 +92,35 @@ export default function KnowledgePage() {
           { label: "Help Center",  type: "help_center", icon: BookOpen,  color: "text-blue-600" },
           { label: "Known Issues", type: "known_issue", icon: Database, color: "text-amber-600" },
           { label: "CSE Cases",    type: "notion_cse",  icon: Database, color: "text-zinc-500" },
-        ].map(({ label, type, icon: Icon, color }) => (
-          <button
-            key={type}
-            onClick={() => setSourceType(sourceType === type ? "" : type)}
-            className={`bg-white border rounded-lg p-4 text-left transition-colors ${
-              sourceType === type ? "border-zinc-400 ring-1 ring-zinc-300" : "border-[var(--border)] hover:border-zinc-300"
-            }`}
-          >
-            <Icon size={16} className={`mb-2 ${color}`} />
-            <p className="text-xs text-[var(--text-muted)] font-medium">{label}</p>
-          </button>
-        ))}
+        ].map(({ label, type, icon: Icon, color }) => {
+          const src = getSource(type);
+          return (
+            <button
+              key={type}
+              onClick={() => setSourceType(sourceType === type ? "" : type)}
+              className={`bg-white border rounded-lg p-4 text-left transition-colors ${
+                sourceType === type ? "border-zinc-400 ring-1 ring-zinc-300" : "border-[var(--border)] hover:border-zinc-300"
+              }`}
+            >
+              <Icon size={16} className={`mb-1 ${color}`} />
+              <p className="text-xs text-[var(--text-muted)] font-medium">{label}</p>
+              <p className="text-lg font-semibold tabular-nums text-[var(--text-primary)] mt-0.5">
+                {sourceCounts[type]?.toLocaleString() ?? "—"}
+              </p>
+              {src && (
+                <div className="flex items-center gap-1 mt-1">
+                  <Clock size={10} className={freshnessColor(src.freshness_status)} />
+                  <span className="text-[10px] text-[var(--text-muted)]">
+                    {src.last_synced_at ? formatDate(src.last_synced_at) : "未同期"}
+                  </span>
+                  {src.sync_enabled === false && (
+                    <span className="text-[10px] text-zinc-400 ml-1">（同期無効）</span>
+                  )}
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Filters */}

@@ -1055,9 +1055,10 @@ export async function processIntercomWebhook(payload) {
     }
   }
 
+  const replyAdminId = targeting.concierge?.intercom_admin_id || config.intercom.adminId;
   try {
-    await replyToConversation(event.intercom_conversation_id, replyMessage);
-    logger.info("reply success", { reply_source: replySource, ...ctx });
+    await replyToConversation(event.intercom_conversation_id, replyMessage, replyAdminId);
+    logger.info("reply success", { reply_source: replySource, admin_id: replyAdminId, ...ctx });
 
     // handoff reply 成功 → handed_off に遷移
     if (replySource === "handoff") {

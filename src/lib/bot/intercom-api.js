@@ -19,12 +19,12 @@ async function icFetch(path, options = {}) {
   return data;
 }
 
-export async function replyToConversation(conversationId, messageBody) {
+export async function replyToConversation(conversationId, messageBody, adminId) {
   return icFetch(`/conversations/${conversationId}/reply`, {
     method: "POST",
     body: JSON.stringify({
       type: "admin",
-      admin_id: config.intercom.adminId,
+      admin_id: adminId || config.intercom.adminId,
       body: messageBody,
       message_type: "comment"
     })

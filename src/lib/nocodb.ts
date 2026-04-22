@@ -40,7 +40,7 @@ export type Message = {
   Id: number;
   session_uid: string;
   message_text: string | null;
-  author_type: string;
+  role: string;
   topic: string | null;
   message_order: number;
   intercom_message_id: string | null;

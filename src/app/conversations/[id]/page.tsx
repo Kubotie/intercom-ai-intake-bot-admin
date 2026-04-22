@@ -48,16 +48,16 @@ export default async function ConversationDetailPage({ params }: { params: Promi
                 <p className="text-xs text-[var(--text-muted)]">メッセージなし</p>
               )}
               {messages.map(m => (
-                <div key={m.Id} className={`flex gap-2.5 ${m.author_type === "user" ? "" : "flex-row-reverse"}`}>
+                <div key={m.Id} className={`flex gap-2.5 ${m.role === "user" ? "" : "flex-row-reverse"}`}>
                   <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                    m.author_type === "user" ? "bg-zinc-200" : "bg-zinc-800"
+                    m.role === "user" ? "bg-zinc-200" : "bg-zinc-800"
                   }`}>
-                    {m.author_type === "user"
+                    {m.role === "user"
                       ? <User size={11} className="text-zinc-600" />
                       : <Bot size={11} className="text-white" />}
                   </div>
                   <div className={`max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed ${
-                    m.author_type === "user"
+                    m.role === "user"
                       ? "bg-zinc-100 text-[var(--text-primary)]"
                       : "bg-zinc-800 text-white"
                   }`}>
@@ -65,6 +65,17 @@ export default async function ConversationDetailPage({ params }: { params: Promi
                   </div>
                 </div>
               ))}
+              {/* Bot の返信プレビューを最後のターンとして表示 */}
+              {session.reply_preview && (
+                <div className="flex gap-2.5 flex-row-reverse">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 bg-zinc-800">
+                    <Bot size={11} className="text-white" />
+                  </div>
+                  <div className="max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed bg-zinc-800 text-white whitespace-pre-wrap">
+                    {session.reply_preview}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

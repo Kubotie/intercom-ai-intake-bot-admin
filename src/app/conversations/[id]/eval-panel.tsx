@@ -5,15 +5,15 @@ import { Button } from "@/components/ui/button";
 import type { Session } from "@/lib/nocodb";
 import { ThumbsUp, ThumbsDown, CheckCircle2 } from "lucide-react";
 
-const BAD_REASONS = [
-  "intent_misclassification",
-  "skill_misrouting",
-  "knowledge_miss",
-  "answer_too_vague",
-  "over_handoff",
-  "over_questioning",
-  "tone_mismatch",
-  "wrong_knowledge_source",
+const BAD_REASONS: { key: string; label: string }[] = [
+  { key: "intent_misclassification", label: "Intent 分類ミス" },
+  { key: "skill_misrouting",         label: "Skill 選択ミス" },
+  { key: "knowledge_miss",           label: "知識不足" },
+  { key: "answer_too_vague",         label: "回答が曖昧" },
+  { key: "over_handoff",             label: "早すぎる Handoff" },
+  { key: "over_questioning",         label: "質問が多すぎる" },
+  { key: "tone_mismatch",            label: "トーン不適切" },
+  { key: "wrong_knowledge_source",   label: "知識ソース誤り" },
 ];
 
 export function EvalPanel({ session }: { session: Session }) {
@@ -64,15 +64,15 @@ export function EvalPanel({ session }: { session: Session }) {
           <div className="space-y-1.5">
             <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide">理由</p>
             <div className="flex flex-wrap gap-1.5">
-              {BAD_REASONS.map(r => (
+              {BAD_REASONS.map(({ key, label }) => (
                 <button
-                  key={r}
-                  onClick={() => setReason(r === reason ? "" : r)}
+                  key={key}
+                  onClick={() => setReason(key === reason ? "" : key)}
                   className={`text-[11px] px-2 py-1 rounded border transition-colors ${
-                    reason === r ? "bg-red-50 border-red-300 text-red-700" : "border-[var(--border)] text-[var(--text-muted)] hover:bg-zinc-50"
+                    reason === key ? "bg-red-50 border-red-300 text-red-700" : "border-[var(--border)] text-[var(--text-muted)] hover:bg-zinc-50"
                   }`}
                 >
-                  {r}
+                  {label}
                 </button>
               ))}
             </div>

@@ -14,6 +14,21 @@ export default function EvaluationPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading]   = useState(true);
   const [filter, setFilter]     = useState<"all" | "good" | "bad" | "unrated">("unrated");
+  const [stats, setStats]       = useState({ good: 0, bad: 0, unrated: 0 });
+
+  // カウントはフィルタと独立して NocoDB の totalRows から取得する
+  const loadStats = async () => {
+    const [g, b, u] = await Promise.all([
+      fetch("/api/sessions?limit=1&where=(evaluation,eq,good)").then(r => r.json()),
+      fetch("/api/sessions?limit=1&where=(evaluation,eq,bad)").then(r => r.json()),
+      fetch("/api/sessions?limit=1&where=(evaluation,blank,true)").then(r => r.json()),
+    ]);
+    setStats({
+      good:    g.pageInfo?.totalRows ?? 0,
+      bad:     b.pageInfo?.totalRows ?? 0,
+      unrated: u.pageInfo?.totalRows ?? 0,
+    });
+  };
 
   const load = async () => {
     setLoading(true);
@@ -28,13 +43,8 @@ export default function EvaluationPage() {
     setLoading(false);
   };
 
+  useEffect(() => { loadStats(); }, []);
   useEffect(() => { load(); }, [filter]);
-
-  const stats = {
-    good:    sessions.filter(s => s.evaluation === "good").length,
-    bad:     sessions.filter(s => s.evaluation === "bad").length,
-    unrated: sessions.filter(s => !s.evaluation).length,
-  };
 
   return (
     <div className="p-6 max-w-[1200px]">
@@ -43,7 +53,7 @@ export default function EvaluationPage() {
           <h1 className="text-lg font-semibold text-[var(--text-primary)]">Evaluation</h1>
           <p className="text-sm text-[var(--text-muted)] mt-0.5">会話の評価と改善ループ</p>
         </div>
-        <Button variant="outline" size="sm" onClick={load}>
+        <Button variant="outline" size="sm" onClick={() => { loadStats(); load(); }}>
           <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> 更新
         </Button>
       </div>

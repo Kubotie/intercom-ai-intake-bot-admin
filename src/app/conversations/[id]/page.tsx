@@ -4,7 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { categoryBadge, replySourceBadge } from "@/components/ui/badge";
 import { formatDate, safeJson, truncate } from "@/lib/utils";
 import { EvalPanel } from "./eval-panel";
-import { User, Bot, ArrowRight } from "lucide-react";
+import { User, Bot, ArrowRight, UserCircle2 } from "lucide-react";
 
 export const revalidate = 0;
 
@@ -159,6 +159,25 @@ export default async function ConversationDetailPage({ params }: { params: Promi
 
         {/* Right: Evaluation */}
         <div className="lg:col-span-1 space-y-3">
+          {/* Concierge */}
+          {(session.concierge_key || session.concierge_name) && (
+            <Card>
+              <CardHeader><CardTitle className="flex items-center gap-1.5"><UserCircle2 size={13} />Concierge</CardTitle></CardHeader>
+              <CardContent className="p-0">
+                {([
+                  ["Key",          <span className="text-xs font-mono">{session.concierge_key ?? "—"}</span>],
+                  ["Name",         <span className="text-xs">{session.concierge_name ?? "—"}</span>],
+                  ["Match Reason", <span className="text-xs font-mono text-[var(--text-muted)]">{session.target_match_reason ?? "—"}</span>],
+                ] as [string, React.ReactNode][]).map(([label, val]) => (
+                  <div key={label} className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border-subtle)] last:border-0">
+                    <span className="text-xs text-[var(--text-muted)] w-28 shrink-0">{label}</span>
+                    <div>{val}</div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
           <EvalPanel session={session} />
 
           {/* Reply preview */}

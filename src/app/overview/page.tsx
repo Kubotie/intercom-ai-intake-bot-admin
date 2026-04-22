@@ -45,6 +45,7 @@ export default async function OverviewPage() {
   const activeConcierges  = concierges.filter(c => c.is_active && !c.is_test_only).length;
   const activeTestTargets = testTargets.list.filter(t => t.is_active).length;
   const latestSync        = knowledgeSources.find(s => s.last_synced_at)?.last_synced_at ?? null;
+  const mainConcierge     = concierges.find(c => c.is_main && c.is_active) ?? null;
 
   return (
     <div className="p-6 max-w-[1200px]">
@@ -62,7 +63,19 @@ export default async function OverviewPage() {
       </div>
 
       {/* Infra status */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="rounded-lg border border-[var(--border)] bg-white p-4">
+          <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Main Concierge</p>
+          {mainConcierge ? (
+            <>
+              <p className="text-sm font-semibold text-[var(--text-primary)] truncate mt-1">{mainConcierge.display_name}</p>
+              <p className="text-[10px] font-mono text-[var(--text-muted)] truncate">{mainConcierge.concierge_key}</p>
+            </>
+          ) : (
+            <p className="text-sm text-[var(--text-muted)] mt-1">未設定</p>
+          )}
+          <Link href="/concierges" className="text-[11px] text-blue-600 hover:underline">管理 →</Link>
+        </div>
         <div className="rounded-lg border border-[var(--border)] bg-white p-4">
           <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Active Concierges</p>
           <p className="text-2xl font-semibold text-[var(--text-primary)] tabular-nums">{activeConcierges}</p>

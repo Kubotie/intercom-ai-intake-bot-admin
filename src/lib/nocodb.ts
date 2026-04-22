@@ -36,6 +36,9 @@ export type Session = {
   latest_user_message: string | null;
   evaluation: string | null;
   eval_reason: string | null;
+  concierge_key: string | null;
+  concierge_name: string | null;
+  target_match_reason: string | null;
   CreatedAt: string;
   UpdatedAt: string;
 };

@@ -14,6 +14,50 @@
 
 ---
 
+## 2 つのモード
+
+### Classifier Only モード（デフォルト）
+
+**目的**: Intent 分類の結果だけを高速に確認する。
+
+- 入力: 発話テキスト
+- 出力: predicted category / confidence / 分類理由
+- スロット収集・Skill 実行・NocoDB アクセスは行わない
+- 実行が軽く（LLM 1 回のみ）、分類チューニングに集中できる
+- 誤分類しやすい近接 Intent とその境界メモを表示
+
+**使いどき**:
+- `intent_misclassification` が続いていて原因を特定したい
+- classifier_prompt.md を修正した後、変化を確認したい
+- 新しい発話パターンがどの Intent に分類されるか確認したい
+
+### Full Simulation モード
+
+**目的**: 分類 → スロット収集 → Skill 実行 → 返信候補 まで全工程をシミュレートする。
+
+- 入力: 発話 / Intent 強制指定（任意）/ Concierge 指定（任意）
+- 出力: Full Simulation 結果（Summary / Routing / Knowledge / Reply / Raw JSON タブ）
+- NocoDB knowledge 読み取り（read-only）を含む
+- 変更前後の挙動比較に使う
+
+**使いどき**:
+- policy / handoff 条件を変えた後に確認
+- knowledge 追加後に candidate_titles に新 FAQ が出るか確認
+- concierge 別の挙動を確認
+
+---
+
+## モード比較
+
+| 項目 | Classifier Only | Full Simulation |
+|------|----------------|-----------------|
+| LLM 呼び出し | 分類のみ（1回） | 分類 + スロット + 次質問（複数回） |
+| NocoDB 読み取り | なし | knowledge_chunks / known_issues / concierges |
+| 実行時間 | ~1 秒 | ~2〜5 秒 |
+| 主な用途 | Intent 分類チューニング | Policy / Skill 全体確認 |
+
+---
+
 ## 本番との違い
 
 | 項目 | 本番 (Webhook) | Sandbox |
@@ -55,15 +99,52 @@
 
 ---
 
+## プリセット発話
+
+ワンクリックで入力欄に入るテストケース（両モード共通）。
+
+| ラベル | 発話 | 期待 Intent |
+|--------|------|------------|
+| 使い方 | ヒートマップの見方を知りたいです | usage_guidance |
+| 体験問題 | ABテストが反映されません | experience_issue |
+| 計測問題 | タグを設置したのに計測されません | tracking_issue |
+| ログイン | ログインできません | login_account |
+| 請求 | プランを確認したいです | billing_contract |
+| 数値差異 | 数値がレポートと違います | report_difference |
+
+---
+
+## intent_misclassification 改善フロー
+
+```
+1. Evaluation → Bad 評価で intent_misclassification を特定
+2. /sandbox → Classifier Only で該当発話を入力
+3. 誤分類なら「近接 Intent・境界メモ」でパターンを確認
+4. /policies → classifier_prompt.md を展開して境界定義を確認
+5. classifier_prompt.md を編集
+6. Sandbox で再実行 → 正しく分類されるか確認
+7. 境界ケースの発話を複数試してリグレッションがないか確認
+8. git push → Vercel デプロイ → Evaluation でモニタリング
+```
+
+---
+
 ## 典型的な使い方
 
-### policy 変更前の確認
+### Classifier Only: intent 分類チューニング
+
+1. Sandbox でモードを「Classifier Only」にする
+2. 誤分類が疑われる発話を入力 → 予測 Intent と confidence を確認
+3. /policies で classifier_prompt.md を展開 → 境界定義を確認
+4. 修正後に Sandbox で再確認 → git push でデプロイ
+
+### policy 変更前の確認（Full Simulation）
 
 1. `ai-support-bot-md/policies/` を編集する
-2. `/sandbox` で「この発話がどう処理されるか」を確認
+2. `/sandbox（Full Simulation）` で「この発話がどう処理されるか」を確認
 3. 意図通りなら main ブランチにマージ → 自動デプロイ
 
-### intent 調整の確認
+### intent 調整の確認（Full Simulation）
 
 - Intent 強制指定で `experience_issue` を選択 → FAQ first の挙動を確認
 - `usage_guidance` → Help Center first の挙動を確認
@@ -82,7 +163,26 @@
 
 ## API
 
-### POST `/api/sandbox/run`
+### POST `/api/sandbox/classify`（Classifier Only）
+
+```json
+// Request
+{ "message": "ABテストが反映されません" }
+```
+
+```json
+// Response
+{
+  "category": "experience_issue",
+  "confidence": 0.92,
+  "reason": "体験/ポップアップ系の表示不具合に言及",
+  "input_message": "ABテストが反映されません",
+  "executed_at": "2026-04-23T...",
+  "prompt_file": "ai-support-bot-md/prompts/classifier_prompt.md"
+}
+```
+
+### POST `/api/sandbox/run`（Full Simulation）
 
 ```json
 // Request

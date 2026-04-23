@@ -58,6 +58,26 @@ export default function EvaluationPage() {
         </Button>
       </div>
 
+      {/* Improvement guide */}
+      <div className="mb-5 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+        <p className="text-xs font-semibold text-zinc-600 mb-2">Bad 評価から改善先を特定する</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {[
+            { reason: "intent_misclassification", label: "Intent 誤分類", link: "/intents", linkLabel: "Intents → classifier_prompt", color: "amber" },
+            { reason: "over_handoff / over_questioning", label: "過剰引き継ぎ・過剰質問", link: "/policies", linkLabel: "Policies → Handoff / Slot", color: "red" },
+            { reason: "knowledge_miss", label: "知識ヒットなし", link: "/knowledge", linkLabel: "Knowledge → FAQ 追加", color: "purple" },
+            { reason: "skill_misrouting", label: "Skill 誤採用", link: "/intents", linkLabel: "Intents → Skill 順序", color: "blue" },
+          ].map(g => (
+            <a key={g.reason} href={g.link}
+              className="block rounded border border-zinc-200 bg-white p-2.5 hover:border-zinc-300 hover:shadow-sm transition-all">
+              <p className="text-[10px] font-mono text-zinc-400 mb-0.5">{g.reason}</p>
+              <p className="text-xs font-semibold text-zinc-700 mb-1">{g.label}</p>
+              <p className="text-[11px] text-blue-600">→ {g.linkLabel}</p>
+            </a>
+          ))}
+        </div>
+      </div>
+
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         {[

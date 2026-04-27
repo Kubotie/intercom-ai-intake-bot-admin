@@ -24,7 +24,7 @@ function normalizeId(record: Record<string, unknown>): number | undefined {
 export async function GET() {
   if (!TABLE) return NextResponse.json({ error: "NOCODB_PROMPTS_TABLE_ID not set" }, { status: 500 });
   try {
-    const data = await nocoFetch(`/tables/${TABLE}/records?limit=50&sort[0][field]=prompt_key&sort[0][direction]=asc`);
+    const data = await nocoFetch(`/tables/${TABLE}/records?limit=50&sort=prompt_key`);
     const raw: Record<string, unknown>[] = data.list ?? [];
     const list = raw.map(r => ({ ...r, Id: normalizeId(r) }));
     logger.info("prompts: list fetched", { count: list.length, sampleId: list[0]?.Id });

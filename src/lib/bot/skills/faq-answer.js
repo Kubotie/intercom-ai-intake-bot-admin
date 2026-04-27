@@ -15,12 +15,19 @@
 // ─────────────────────────────────────────────
 
 import { config } from "../config.js";
+import { loadSkillPrompt } from "../policy-loader.js";
 import { retrieveKnowledgeCandidates, filterExposable, buildQuery } from "../knowledge/retrieval.js";
 
 export const SKILL_NAME = "faq_answer";
 export const CONFIDENCE_THRESHOLD = 0.65;
 
-const SUPPORTED_CATEGORIES = new Set(["usage_guidance", "experience_issue"]);
+const SUPPORTED_CATEGORIES = new Set([
+  "usage_guidance",
+  "experience_issue",
+  "login_account",
+  "billing_contract",
+  "general_inquiry"
+]);
 
 function notHandled(reason) {
   return {
@@ -36,34 +43,88 @@ function notHandled(reason) {
 }
 
 /**
+ * ユーザーメッセージから複数の質問セグメントを抽出する。
+ * 「？」区切りまたは接続詞区切りで2件以上の質問を検出した場合に分割する。
+ *
+ * @param {string} message
+ * @returns {string[]} 質問セグメントの配列 (分割不要なら [message] のまま)
+ */
+function extractQuestionSegments(message) {
+  const byQuestion = message.split("？").map(s => s.trim()).filter(s => s.length > 8);
+  if (byQuestion.length >= 2) return byQuestion;
+
+  const byPeriod = message
+    .split(/。\s*(?:また、|もう一点、|あと、|さらに、|ついでに、|加えて、)/)
+    .map(s => s.trim())
+    .filter(s => s.length > 8);
+  if (byPeriod.length >= 2) return byPeriod;
+
+  return [message];
+}
+
+/**
  * Notion FAQ source を使って回答候補を生成する。
  * knowledge_chunks が空の場合は handled=false を返す。
  *
- * @param {{ latestUserMessage: string, category: string, collectedSlots: object }} opts
+ * @param {{ latestUserMessage: string, category: string, collectedSlots: object, sourcePriorityProfile?: object }} opts
  * @returns {Promise<SkillResult>}
  */
-export async function runFaqAnswerSkill({ latestUserMessage, category, collectedSlots }) {
+export async function runFaqAnswerSkill({ latestUserMessage, category, collectedSlots, authorName, sourcePriorityProfile }) {
   if (!SUPPORTED_CATEGORIES.has(category)) {
     return notHandled(`category ${category} is not supported by faq_answer`);
+  }
+
+  // sourcePriorityProfile が指定されており notion_faq が許可されていない場合はスキップ
+  if (sourcePriorityProfile?.allowedSources && !sourcePriorityProfile.allowedSources.includes("notion_faq")) {
+    return notHandled("notion_faq source not allowed by source_priority_profile");
   }
 
   if (!config.llm.apiKey) {
     return notHandled("LLM_API_KEY not set");
   }
 
-  // notion_faq source のみ検索 (notion_cse は使わない)
-  // experience_issue は同一症状に複数原因パターンがあるため5件取得して統合回答を生成
+  // 複数質問を検出して並行検索する
+  // 単一質問: limit=5, 複数質問: 各質問で limit=3 → 最大6件にマージ
   const retrievalQuery = buildQuery(category, latestUserMessage, collectedSlots || {});
+  const questionSegments = extractQuestionSegments(latestUserMessage);
+  const isMultiQuestion = questionSegments.length > 1;
+
   let candidates = [];
   try {
-    const all = await retrieveKnowledgeCandidates({
-      category,
-      latestUserMessage,
-      collectedSlots: collectedSlots || {},
-      allowedSourceTypes: ["notion_faq"],
-      limit: 5
-    });
-    candidates = filterExposable(all);
+    if (isMultiQuestion) {
+      const perQueryResults = await Promise.all(
+        questionSegments.map(q =>
+          retrieveKnowledgeCandidates({
+            category,
+            latestUserMessage: q,
+            collectedSlots: collectedSlots || {},
+            allowedSourceTypes: ["notion_faq"],
+            limit: 3
+          }).catch(() => [])
+        )
+      );
+      const seen = new Set();
+      const merged = perQueryResults
+        .flat()
+        .sort((a, b) => b.confidence_hint - a.confidence_hint)
+        .filter(c => {
+          const key = c.chunk_id ?? `${c.source_type}:${c.title}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .slice(0, 6);
+      candidates = filterExposable(merged);
+    } else {
+      const all = await retrieveKnowledgeCandidates({
+        category,
+        latestUserMessage,
+        collectedSlots: collectedSlots || {},
+        allowedSourceTypes: ["notion_faq"],
+        limit: 5
+      });
+      candidates = filterExposable(all);
+    }
   } catch {
     return notHandled(`retrieval failed | query:${retrievalQuery}`);
   }
@@ -84,7 +145,7 @@ export async function runFaqAnswerSkill({ latestUserMessage, category, collected
   // LLM で回答を生成する
   let llmResult;
   try {
-    llmResult = await generateAnswerFromCandidates(latestUserMessage, collectedSlots || {}, candidates);
+    llmResult = await generateAnswerFromCandidates(latestUserMessage, collectedSlots || {}, candidates, authorName || null, isMultiQuestion);
   } catch (err) {
     return {
       handled: false,
@@ -131,7 +192,7 @@ export async function runFaqAnswerSkill({ latestUserMessage, category, collected
   };
 }
 
-async function generateAnswerFromCandidates(latestUserMessage, collectedSlots, candidates) {
+async function generateAnswerFromCandidates(latestUserMessage, collectedSlots, candidates, authorName, isMultiQuestion = false) {
   const sourceContext = candidates
     .map((c) => `## ${c.title}${c.url ? `\nURL: ${c.url}` : ""}\n\n${c.body || "(本文なし)"}`)
     .join("\n\n---\n\n");
@@ -144,29 +205,16 @@ async function generateAnswerFromCandidates(latestUserMessage, collectedSlots, c
 
   const userQuery = [latestUserMessage, ...slotContext].filter(Boolean).join(" / ");
 
-  const systemPrompt = `あなたはPtengineのサポートBotです。社内FAQを参照して顧客の質問に回答してください。
+  const customerLabel = authorName ? `${authorName}様` : "お客様";
 
-FAQの性格:
-- FAQはトラブルシューティング型です（「なぜこうなるか」「どう解決するか」を説明）
-- 同じ症状に複数の原因パターンがある場合、代表的なものをまとめて説明してください
+  const multiQuestionInstruction = isMultiQuestion
+    ? "顧客は複数の質問をしています。それぞれの質問に番号付きで回答してください（① ② ③ …）"
+    : "複数のFAQが関連する場合は統合して箇条書きで回答する";
 
-回答ルール:
-- 提供されたFAQ情報のみを根拠にする
-- 社内向けの情報・担当者名・内部URLは含めない
-- 断定しすぎない（「〜の可能性があります」「〜から確認ください」程度）
-- 複数のFAQが関連する場合は統合して「主な原因として〜が考えられます」形式で回答
-- 回答は400文字以内
-- 確信度の基準:
-  - FAQ が症状・機能名と一致 → 0.75以上
-  - FAQ が部分的に関連 → 0.5〜0.74
-  - FAQ が無関係・全く別の話題 → 0.3以下
-
-出力はJSONのみ:
-{
-  "answer_message": "回答文（FAQが完全に無関係な場合のみnull）",
-  "confidence": 0.75,
-  "reason": "参照したFAQタイトルと関連性の説明"
-}`;
+  const systemPrompt = loadSkillPrompt("faq-answer", {
+    customer_label: customerLabel,
+    multi_question_instruction: multiQuestionInstruction
+  });
 
   const res = await fetch(`${config.llm.baseUrl}/chat/completions`, {
     method: "POST",

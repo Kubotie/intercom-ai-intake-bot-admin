@@ -16,12 +16,19 @@ async function nocoFetch(path: string, options: RequestInit = {}) {
   return res.json();
 }
 
+function normalizeId(record: Record<string, unknown>): number | undefined {
+  const v = record["Id"] ?? record["id"] ?? record["rowId"] ?? record["row_id"];
+  return typeof v === "number" ? v : (typeof v === "string" ? parseInt(v, 10) || undefined : undefined);
+}
+
 export async function GET() {
   if (!TABLE) return NextResponse.json({ error: "NOCODB_PROMPTS_TABLE_ID not set" }, { status: 500 });
   try {
-    const data = await nocoFetch(`/tables/${TABLE}/records?limit=50&sort=prompt_key`);
-    logger.info("prompts: list fetched", { count: data.list?.length ?? 0 });
-    return NextResponse.json({ list: data.list ?? [] });
+    const data = await nocoFetch(`/tables/${TABLE}/records?limit=50&sort[0][field]=prompt_key&sort[0][direction]=asc`);
+    const raw: Record<string, unknown>[] = data.list ?? [];
+    const list = raw.map(r => ({ ...r, Id: normalizeId(r) }));
+    logger.info("prompts: list fetched", { count: list.length, sampleId: list[0]?.Id });
+    return NextResponse.json({ list });
   } catch (err) {
     logger.error("prompts: list failed", { error: (err as Error).message });
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
@@ -31,9 +38,10 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   if (!TABLE) return NextResponse.json({ error: "NOCODB_PROMPTS_TABLE_ID not set" }, { status: 500 });
   const body = await request.json();
-  const { Id, content } = body;
+  const Id: number | undefined = body.Id ?? body.id ?? body.rowId;
+  const { content } = body;
   if (!Id || typeof content !== "string") {
-    return NextResponse.json({ error: "Id and content are required" }, { status: 400 });
+    return NextResponse.json({ error: `Id and content are required (got Id=${Id}, contentType=${typeof content})` }, { status: 400 });
   }
   try {
     await nocoFetch(`/tables/${TABLE}/records`, {

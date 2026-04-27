@@ -86,5 +86,72 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ results });
   }
 
+  // plan: custom_attributes.plan でコンタクト検索 → ユニークなプラン値を返す
+  if (type === "plan") {
+    if (q.length < 1) return NextResponse.json({ results: [] });
+    const res = await fetch(`${IC_BASE}/contacts/search`, {
+      method: "POST",
+      headers: icHeaders,
+      body: JSON.stringify({
+        query: { field: "custom_attributes.plan", operator: "~", value: q },
+        pagination: { per_page: 50 },
+      }),
+    });
+    if (!res.ok) return NextResponse.json({ results: [] }, { status: res.status });
+    const data = await res.json();
+    const contacts = (data.data ?? []) as Record<string, unknown>[];
+    // ユニークなプラン値に集約
+    const planCounts = new Map<string, number>();
+    for (const c of contacts) {
+      const attrs = c.custom_attributes as Record<string, unknown> | null | undefined;
+      const plan = attrs?.plan;
+      if (plan && typeof plan === "string" && plan.trim()) {
+        planCounts.set(plan.trim(), (planCounts.get(plan.trim()) ?? 0) + 1);
+      }
+    }
+    const results = Array.from(planCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([plan, count]) => ({
+        value: plan,
+        label: plan,
+        sub:   `${count}件のコンタクト`,
+      }));
+    return NextResponse.json({ results });
+  }
+
+  // domain: メールアドレスでコンタクト検索 → ユニークなドメインを返す
+  if (type === "domain") {
+    if (q.length < 2) return NextResponse.json({ results: [] });
+    const res = await fetch(`${IC_BASE}/contacts/search`, {
+      method: "POST",
+      headers: icHeaders,
+      body: JSON.stringify({
+        query: { field: "email", operator: "~", value: q },
+        pagination: { per_page: 50 },
+      }),
+    });
+    if (!res.ok) return NextResponse.json({ results: [] }, { status: res.status });
+    const data = await res.json();
+    const contacts = (data.data ?? []) as Record<string, unknown>[];
+    // メールからドメインを抽出してユニーク化
+    const domainCounts = new Map<string, number>();
+    for (const c of contacts) {
+      const email = c.email;
+      if (email && typeof email === "string") {
+        const parts = email.split("@");
+        const domain = parts[1]?.toLowerCase();
+        if (domain) domainCounts.set(domain, (domainCounts.get(domain) ?? 0) + 1);
+      }
+    }
+    const results = Array.from(domainCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([domain, count]) => ({
+        value: domain,
+        label: domain,
+        sub:   `${count}件のコンタクト`,
+      }));
+    return NextResponse.json({ results });
+  }
+
   return NextResponse.json({ results: [] });
 }

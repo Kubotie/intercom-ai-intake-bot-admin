@@ -9,7 +9,7 @@ import type { TestTarget } from "@/lib/nocodb";
 
 type Suggestion = { value: string; label: string; sub: string };
 
-const SEARCHABLE_TYPES = new Set(["contact", "conversation", "email", "company"]);
+const SEARCHABLE_TYPES = new Set(["contact", "conversation", "email", "company", "plan", "domain"]);
 
 const TARGET_TYPES = ["contact", "conversation", "email", "domain", "company", "plan"] as const;
 const ENVIRONMENTS = ["", "prod", "staging", "dev"] as const;

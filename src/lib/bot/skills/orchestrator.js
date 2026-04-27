@@ -15,6 +15,7 @@
 
 import { logger } from "../logger.js";
 import { getSkillsForCategory } from "./registry.js";
+import { applySkillProfileOrder } from "../concierge-profiles.js";
 
 /**
  * @typedef {Object} SkillResult
@@ -74,6 +75,10 @@ const UNHANDLED_RESULT = Object.freeze({
 //   exception                — skill の run() が例外を throw した
 // ─────────────────────────────────────────────
 
+// confidence が SOFT_THRESHOLD 以上かつ全 skill の threshold 未満のとき
+// soft_handled=true として部分回答 + スロット質問のハイブリッド返信を返す
+const SOFT_THRESHOLD = 0.45;
+
 /**
  * skill 結果を採用するかを判定し、採用/不採用と理由コードを返す。
  * 採用基準をここに集約することで、skill ごとに閾値を変えやすくする。
@@ -111,11 +116,17 @@ export function shouldUseSkillResult(result, skillEntry) {
  * category に対応する skill を順に実行し、最初に採用できた結果を返す。
  * candidate_results に全 skill の実行結果と rejection_reason を含める。
  *
- * @param {{ category: string, latestUserMessage: string, collectedSlots: object, ctx: object }} opts
+ * skillProfile が渡された場合は applySkillProfileOrder で実行順・閾値を上書きする。
+ * 優先度: workflow override > concierge profile > registry default
+ *
+ * @param {{ category: string, latestUserMessage: string, collectedSlots: object, skillProfile?: object, ctx: object }} opts
  * @returns {Promise<OrchestrationResult>}
  */
-export async function runSkillOrchestration({ category, latestUserMessage, collectedSlots, ctx }) {
-  const skills = getSkillsForCategory(category);
+export async function runSkillOrchestration({ category, latestUserMessage, collectedSlots, skillProfile = null, ctx }) {
+  const baseSkills = getSkillsForCategory(category);
+  const skills = skillProfile
+    ? applySkillProfileOrder(baseSkills, category, skillProfile)
+    : baseSkills;
   /** @type {CandidateRecord[]} */
   const candidateResults = [];
 
@@ -131,8 +142,9 @@ export async function runSkillOrchestration({ category, latestUserMessage, colle
 
   logger.info("skill orchestration started", {
     category,
-    skill_count: skills.length,
-    skill_names: skills.map((s) => s.name),
+    skill_count:        skills.length,
+    active_skill_order: skills.map((s) => s.name),
+    profile_applied:    skillProfile !== null,
     ...ctx
   });
 
@@ -167,7 +179,8 @@ export async function runSkillOrchestration({ category, latestUserMessage, colle
         answer_type: result?.answer_type ?? null,
         reason: result?.reason ?? null,
         rejection_reason,
-        answer_candidate_json: result?.answer_candidate_json ?? null
+        answer_candidate_json: result?.answer_candidate_json ?? null,
+        answer_message: rejection_reason === "confidence_below_threshold" ? (result?.answer_message ?? null) : null
       });
 
       if (accepted) {
@@ -217,6 +230,35 @@ export async function runSkillOrchestration({ category, latestUserMessage, colle
         rejection_reason
       });
     }
+  }
+
+  // soft answer: SOFT_THRESHOLD 以上の confidence 候補があれば部分回答として返す
+  const softCandidates = candidateResults.filter(
+    (c) => c.rejection_reason === "confidence_below_threshold" && c.confidence >= SOFT_THRESHOLD && c.answer_message
+  );
+  if (softCandidates.length > 0) {
+    const best = softCandidates.sort((a, b) => b.confidence - a.confidence)[0];
+    logger.info("soft answer selected", {
+      category,
+      skill_name: best.skill_name,
+      confidence: best.confidence,
+      ...ctx
+    });
+    return {
+      handled: false,
+      soft_handled: true,
+      soft_answer_message: best.answer_message,
+      soft_confidence: best.confidence,
+      selected_skill: best.skill_name,
+      answer_type: null,
+      answer_message: null,
+      confidence: best.confidence,
+      sources: [],
+      reason: `soft answer (confidence=${best.confidence})`,
+      should_escalate: false,
+      next_action: null,
+      candidate_results: candidateResults
+    };
   }
 
   logger.info("no skill result accepted", {

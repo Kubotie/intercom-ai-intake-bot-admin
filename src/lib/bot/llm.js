@@ -42,7 +42,7 @@ export async function classifyCategory({ latestUserMessage, categoryCandidates }
   ]);
 }
 
-export async function generateNextQuestion({ category, requiredSlots, collectedSlots, askSlots, latestUserMessage, conversationHistorySummary, escalationSignals }) {
+export async function generateNextQuestion({ category, requiredSlots, collectedSlots, askSlots, latestUserMessage, conversationHistorySummary, escalationSignals, customerName, isFirstContact }) {
   const policyBundle = loadPolicyBundle();
   const prompt = loadPrompt("prompts/next_question_prompt.md");
   return chat([
@@ -55,7 +55,9 @@ export async function generateNextQuestion({ category, requiredSlots, collectedS
       ask_slots: askSlots,
       latest_user_message: latestUserMessage,
       conversation_history_summary: conversationHistorySummary,
-      escalation_signals: escalationSignals
+      escalation_signals: escalationSignals,
+      customer_name: customerName || null,
+      is_first_contact: isFirstContact || false
     }, null, 2) }
   ]);
 }

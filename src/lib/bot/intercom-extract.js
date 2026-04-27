@@ -108,6 +108,14 @@ export function extractIntercomEvent(payload) {
     item?.conversation_message?.author?.type ||
     null;
 
+  // ── author_name ────────────────────────────────
+  const author_name =
+    (isReplied && latestUserPart?.author?.name) ||
+    source?.author?.name ||
+    item?.source?.author?.name ||
+    item?.conversation_message?.author?.name ||
+    null;
+
   // ── intercom_contact_id ───────────────────────
   const intercom_contact_id =
     item?.contacts?.contacts?.[0]?.id ||
@@ -131,6 +139,7 @@ export function extractIntercomEvent(payload) {
     latest_user_message,
     created_at_ts,
     author_type,
+    author_name: author_name || null,
     message_id_source,
     raw_payload_json: JSON.stringify(payload)
   };

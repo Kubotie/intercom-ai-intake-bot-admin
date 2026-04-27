@@ -292,3 +292,64 @@ export async function getSessionStats(): Promise<{
   }
   return { total: res.pageInfo.totalRows, byCategory, byReplySource, byStatus, escalated, handedOff };
 }
+
+function toJSTDateStr(d: Date): string {
+  return new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function isSkillAccepted(replySource: string | null): boolean {
+  return replySource === "faq_answer" || replySource === "help_center_answer" || replySource === "known_bug_match";
+}
+
+export type TodayStats = {
+  replies: number;
+  handoffs: number;
+  escalations: number;
+  skillAccepted: number;
+  skillRejected: number;
+};
+
+export async function getSessionStatsToday(): Promise<TodayStats> {
+  const todayJST = toJSTDateStr(new Date());
+  const todayStartUTC = new Date(`${todayJST}T00:00:00+09:00`).toISOString();
+  const res = await getSessions({ limit: 200, where: `(CreatedAt,gte,${todayStartUTC})`, sort: "-CreatedAt" });
+  let replies = 0, handoffs = 0, escalations = 0, skillAccepted = 0, skillRejected = 0;
+  for (const s of res.list) {
+    if (toJSTDateStr(new Date(s.CreatedAt)) !== todayJST) continue;
+    replies++;
+    if (s.should_escalate) escalations++;
+    if (s.status === "handed_off" || s.reply_source === "handoff") handoffs++;
+    if (isSkillAccepted(s.reply_source)) skillAccepted++;
+    else if (s.selected_skill) skillRejected++;
+  }
+  return { replies, handoffs, escalations, skillAccepted, skillRejected };
+}
+
+export type DailyStat = {
+  date: string;
+  replies: number;
+  handoffs: number;
+  escalations: number;
+  skillAccepted: number;
+};
+
+export async function getDailyStats(days: number = 7): Promise<DailyStat[]> {
+  const now = new Date();
+  const dates: string[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    dates.push(toJSTDateStr(new Date(now.getTime() - i * 24 * 60 * 60 * 1000)));
+  }
+  const startUTC = new Date(`${dates[0]}T00:00:00+09:00`).toISOString();
+  const res = await getSessions({ limit: 500, where: `(CreatedAt,gte,${startUTC})`, sort: "CreatedAt" });
+  const statsMap: Record<string, DailyStat> = {};
+  for (const d of dates) statsMap[d] = { date: d, replies: 0, handoffs: 0, escalations: 0, skillAccepted: 0 };
+  for (const s of res.list) {
+    const d = toJSTDateStr(new Date(s.CreatedAt));
+    if (!statsMap[d]) continue;
+    statsMap[d].replies++;
+    if (s.should_escalate) statsMap[d].escalations++;
+    if (s.status === "handed_off" || s.reply_source === "handoff") statsMap[d].handoffs++;
+    if (isSkillAccepted(s.reply_source)) statsMap[d].skillAccepted++;
+  }
+  return dates.map(d => statsMap[d]);
+}

@@ -28,7 +28,7 @@ const MAX_REPLY_LENGTH = 1000;
 
 // skill 回答として有効な answer_type 一覧
 // 新しい skill を追加した際はここに追記する
-const SKILL_ANSWER_TYPES = new Set(["help_center_answer", "faq_answer", "known_bug_match"]);
+const SKILL_ANSWER_TYPES = new Set(["help_center_answer", "faq_answer", "known_bug_match", "soft_answer"]);
 
 function safeParseCandidate(raw) {
   if (!raw) return null;
@@ -39,19 +39,34 @@ function safeParseCandidate(raw) {
   }
 }
 
+function buildHandoffReply(authorName) {
+  const prefix = authorName ? `${authorName}様、` : "";
+  return `${prefix}ご共有いただきありがとうございます。確認できましたので、担当者に引き継ぎ確認いたします。引き続きよろしくお願い申し上げます。`;
+}
+
+function buildEscalationReply(authorName) {
+  const prefix = authorName ? `${authorName}様、` : "";
+  return `${prefix}ご連絡いただきありがとうございます🙇‍♀️ 内容を確認し、担当者に引き継いで対応いたします。引き続きよろしくお願い申し上げます。`;
+}
+
+function buildFallbackReply(authorName) {
+  const prefix = authorName ? `${authorName}様、` : "";
+  return `${prefix}ご連絡ありがとうございます。内容を確認しております。引き続きよろしくお願い申し上げます。`;
+}
+
 /**
- * @param {{ answerCandidateJson: string|object|null, shouldEscalate: boolean, status: string }} opts
- * @returns {{ replyMessage: string|null, replySource: "escalation"|"handoff"|"already_handed_off"|"help_center_answer"|"faq_answer"|"known_bug_match"|"next_message"|"fallback" }}
+ * @param {{ answerCandidateJson: string|object|null, shouldEscalate: boolean, status: string, authorName?: string|null }} opts
+ * @returns {{ replyMessage: string|null, replySource: "escalation"|"handoff"|"already_handed_off"|"help_center_answer"|"faq_answer"|"known_bug_match"|"soft_answer"|"next_message"|"fallback" }}
  */
-export function resolveReplyMessage({ answerCandidateJson, shouldEscalate, status }) {
+export function resolveReplyMessage({ answerCandidateJson, shouldEscalate, status, authorName }) {
   // 優先度 1: エスカレーション (status に関わらず最優先)
   if (shouldEscalate) {
-    return { replyMessage: ESCALATION_REPLY, replySource: "escalation" };
+    return { replyMessage: buildEscalationReply(authorName), replySource: "escalation" };
   }
 
   // 優先度 2: handoff 準備完了 → 固定 handoff 文面
   if (status === "ready_for_handoff") {
-    return { replyMessage: HANDOFF_REPLY, replySource: "handoff" };
+    return { replyMessage: buildHandoffReply(authorName), replySource: "handoff" };
   }
 
   // 優先度 3: すでに handed_off → 返信しない
@@ -61,7 +76,7 @@ export function resolveReplyMessage({ answerCandidateJson, shouldEscalate, statu
 
   const candidate = safeParseCandidate(answerCandidateJson);
 
-  // 優先度 4: skill 回答 (help_center_answer / known_bug_match 等)
+  // 優先度 4: skill 回答 (help_center_answer / known_bug_match / soft_answer 等)
   // replySource には answer_type をそのまま使う (例: "known_bug_match")
   if (SKILL_ANSWER_TYPES.has(candidate?.answer_type) && candidate?.answer_message) {
     const replyMessage = String(candidate.answer_message).trim().slice(0, MAX_REPLY_LENGTH);
@@ -78,5 +93,5 @@ export function resolveReplyMessage({ answerCandidateJson, shouldEscalate, statu
   }
 
   // 優先度 6: fallback
-  return { replyMessage: FALLBACK_REPLY, replySource: "fallback" };
+  return { replyMessage: buildFallbackReply(authorName), replySource: "fallback" };
 }

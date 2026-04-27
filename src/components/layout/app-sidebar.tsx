@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import {
   LayoutDashboard, MessageSquare, Star, FileText,
   GitBranch, Zap, BookOpen, Users, ScrollText, FlaskConical, Settings, Bot, TestTube2,
-  ClipboardList, Lightbulb, User, LogOut, Network, PenLine,
+  User, LogOut, PenLine,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -14,10 +14,7 @@ const ALL_NAV = [
   { href: "/conversations",  icon: MessageSquare,   label: "Conversations" },
   { href: "/evaluation",     icon: Star,            label: "Evaluation" },
   { href: "/policies",       icon: FileText,        label: "Policies" },
-  { href: "/workflows",      icon: Network,         label: "Workflows" },
   { href: "/intents",        icon: GitBranch,       label: "Intents & Routing" },
-  { href: "/drafts",         icon: ClipboardList,   label: "Draft Queue" },
-  { href: "/learnings",      icon: Lightbulb,       label: "Learnings" },
   { href: "/skills",         icon: Zap,             label: "Skills" },
   { href: "/prompts",        icon: PenLine,         label: "Prompts" },
   { href: "/knowledge",      icon: BookOpen,        label: "Knowledge" },

@@ -211,7 +211,7 @@ async function generateAnswerFromCandidates(latestUserMessage, collectedSlots, c
     ? "顧客は複数の質問をしています。それぞれの質問に番号付きで回答してください（① ② ③ …）"
     : "複数のFAQが関連する場合は統合して箇条書きで回答する";
 
-  const systemPrompt = loadSkillPrompt("faq-answer", {
+  const systemPrompt = await loadSkillPrompt("faq-answer", {
     customer_label: customerLabel,
     multi_question_instruction: multiQuestionInstruction
   });

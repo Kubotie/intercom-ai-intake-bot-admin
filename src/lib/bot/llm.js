@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { loadPolicyBundle, loadPrompt } from "./policy-loader.js";
+import { loadPolicyBundle, loadPromptAsync } from "./policy-loader.js";
 
 function extractJson(text) {
   const trimmed = String(text || "").trim();
@@ -34,7 +34,7 @@ async function chat(messages) {
 
 export async function classifyCategory({ latestUserMessage, categoryCandidates }) {
   const policyBundle = loadPolicyBundle();
-  const prompt = loadPrompt("prompts/classifier_prompt.md");
+  const prompt = await loadPromptAsync("prompts/classifier_prompt.md");
   return chat([
     { role: "system", content: policyBundle },
     { role: "system", content: prompt },
@@ -44,7 +44,7 @@ export async function classifyCategory({ latestUserMessage, categoryCandidates }
 
 export async function generateNextQuestion({ category, requiredSlots, collectedSlots, askSlots, latestUserMessage, conversationHistorySummary, escalationSignals, customerName, isFirstContact }) {
   const policyBundle = loadPolicyBundle();
-  const prompt = loadPrompt("prompts/next_question_prompt.md");
+  const prompt = await loadPromptAsync("prompts/next_question_prompt.md");
   return chat([
     { role: "system", content: policyBundle },
     { role: "system", content: prompt },
@@ -63,7 +63,7 @@ export async function generateNextQuestion({ category, requiredSlots, collectedS
 }
 
 export async function extractSlots({ category, requiredSlots, latestUserMessage }) {
-  const prompt = loadPrompt("prompts/slot_extractor_prompt.md");
+  const prompt = await loadPromptAsync("prompts/slot_extractor_prompt.md");
   return chat([
     { role: "system", content: prompt },
     { role: "user", content: JSON.stringify({
@@ -76,7 +76,7 @@ export async function extractSlots({ category, requiredSlots, latestUserMessage 
 
 export async function summarizeForAgent(input) {
   const policyBundle = loadPolicyBundle();
-  const prompt = loadPrompt("prompts/summarizer_prompt.md");
+  const prompt = await loadPromptAsync("prompts/summarizer_prompt.md");
   return chat([
     { role: "system", content: policyBundle },
     { role: "system", content: prompt },

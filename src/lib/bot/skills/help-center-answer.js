@@ -216,7 +216,7 @@ async function generateAnswerFromSources(latestUserMessage, collectedSlots, sour
     ? "顧客は複数の質問をしています。それぞれの質問に番号付きで回答してください（① ② ③ …）"
     : "複数の記事が関連する場合は統合して箇条書きで回答する";
 
-  const systemPrompt = loadSkillPrompt("help-center-answer", {
+  const systemPrompt = await loadSkillPrompt("help-center-answer", {
     customer_label: customerLabel,
     multi_question_instruction: multiQuestionInstruction
   });

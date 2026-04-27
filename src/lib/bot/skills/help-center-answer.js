@@ -4,14 +4,19 @@
 // usage_guidance / experience_issue intent で使用。
 // Ptengine Help Center を参照してユーザーの使い方・体験系質問に回答する。
 //
+// 検索戦略 (2段構え):
+//   1. knowledge_chunks テーブル (source_type=help_center) — sync-help-center cron で事前インデックス済み
+//   2. オンデマンドスクレイピング (https://helps.ptengine.com) — チャンクが空の場合のフォールバック
+//
 // 返却 shape は共通 skill interface に準拠:
 //   { handled, answer_type, answer_message, confidence, sources, reason, should_escalate, next_action }
 //
 // 信頼度閾値のチェックは orchestrator 側で行う。
-// このスキルは「検索して LLM に回答を生成させた結果」をそのまま返す。
 // ─────────────────────────────────────────────
 
 import { config } from "../config.js";
+import { loadSkillPrompt } from "../policy-loader.js";
+import { searchChunks } from "../knowledge/chunks.js";
 
 export const SKILL_NAME = "help_center_answer";
 export const CONFIDENCE_THRESHOLD = 0.65;
@@ -21,7 +26,6 @@ const MAX_SOURCES = 2;
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_ARTICLE_CHARS = 2000;
 
-// 共通 interface の空結果を生成するヘルパー
 function notHandled(reason) {
   return {
     handled: false,
@@ -35,6 +39,19 @@ function notHandled(reason) {
   };
 }
 
+function extractQuestionSegments(message) {
+  const byQuestion = message.split("？").map(s => s.trim()).filter(s => s.length > 8);
+  if (byQuestion.length >= 2) return byQuestion;
+
+  const byPeriod = message
+    .split(/。\s*(?:また、|もう一点、|あと、|さらに、|ついでに、|加えて、)/)
+    .map(s => s.trim())
+    .filter(s => s.length > 8);
+  if (byPeriod.length >= 2) return byPeriod;
+
+  return [message];
+}
+
 function buildQuery(category, latestUserMessage, collectedSlots) {
   const parts = [];
   if (category === "experience_issue") {
@@ -42,28 +59,38 @@ function buildQuery(category, latestUserMessage, collectedSlots) {
     if (collectedSlots?.symptom) parts.push(collectedSlots.symptom);
     if (collectedSlots?.device_type) parts.push(collectedSlots.device_type);
   } else {
-    // usage_guidance
     if (collectedSlots?.target_feature) parts.push(collectedSlots.target_feature);
     if (collectedSlots?.user_goal) parts.push(collectedSlots.user_goal);
     if (collectedSlots?.feature_category) parts.push(collectedSlots.feature_category);
   }
-  // 元の発話を常に補完する (slot が英語コードでも日本語マッチを保証)
   const msgSlice = latestUserMessage.slice(0, 150);
   if (!parts.includes(msgSlice)) parts.push(msgSlice);
   return parts.join(" ");
 }
 
-function parseArticlesFromHtml(html) {
-  const results = [];
-  const re = /href="(\/(?:en|ja|zh|ko)\/articles\/[^"#?]+)"[^>]*>\s*([^<]{3,120})\s*</g;
-  let m;
-  while ((m = re.exec(html)) !== null && results.length < MAX_SOURCES) {
-    const url = `${HELP_CENTER_BASE}${m[1]}`;
-    const title = m[2].trim();
-    if (title) results.push({ title, url });
+// ─── チャンクテーブル検索 ────────────────────────────────────────────────
+
+/**
+ * knowledge_chunks テーブルから help_center 記事を検索する。
+ * @param {string} query
+ * @returns {Promise<Array<{ title: string, url: string, body: string }>>}
+ */
+async function searchFromChunks(query) {
+  try {
+    const chunks = await searchChunks({
+      sourceTypes: ["help_center"],
+      query,
+      limit: MAX_SOURCES
+    });
+    return chunks
+      .filter((c) => c.title || c.body)
+      .map((c) => ({ title: c.title, url: c.url, body: c.body }));
+  } catch {
+    return [];
   }
-  return results;
 }
+
+// ─── オンデマンドスクレイピング (フォールバック) ──────────────────────────
 
 async function fetchWithTimeout(url, ms) {
   const controller = new AbortController();
@@ -78,8 +105,16 @@ async function fetchWithTimeout(url, ms) {
   }
 }
 
-async function fetchArticleText(url) {
-  return fetchArticleBodyFromUrl(url);
+function parseArticlesFromHtml(html) {
+  const results = [];
+  const re = /href="(\/(?:en|ja|zh|ko)\/articles\/[^"#?]+)"[^>]*>\s*([^<]{3,120})\s*</g;
+  let m;
+  while ((m = re.exec(html)) !== null && results.length < MAX_SOURCES) {
+    const url = `${HELP_CENTER_BASE}${m[1]}`;
+    const title = m[2].trim();
+    if (title) results.push({ title, url });
+  }
+  return results;
 }
 
 /**
@@ -108,6 +143,7 @@ export async function fetchArticleBodyFromUrl(url) {
 
 /**
  * Help Center を検索して候補記事を返す (最大 MAX_SOURCES 件)。
+ * オンデマンドスクレイピング。フォールバック用。
  * @param {string} query
  * @returns {Promise<Array<{ title: string, url: string }>>}
  */
@@ -142,16 +178,28 @@ export async function searchHelpCenter(query) {
   return [];
 }
 
-async function generateAnswerFromSources(latestUserMessage, collectedSlots, sources) {
-  const contents = await Promise.all(
-    sources.map(async (s) => {
-      const content = await fetchArticleText(s.url);
-      return { ...s, content };
+/**
+ * オンデマンドで検索して記事本文を取得する。
+ * @param {string} query
+ * @returns {Promise<Array<{ title: string, url: string, body: string }>>}
+ */
+async function searchFromWeb(query) {
+  const candidates = await searchHelpCenter(query);
+  if (candidates.length === 0) return [];
+
+  return Promise.all(
+    candidates.map(async (c) => {
+      const body = await fetchArticleBodyFromUrl(c.url);
+      return { title: c.title, url: c.url, body };
     })
   );
+}
 
-  const sourceContext = contents
-    .map((s) => `## ${s.title}\nURL: ${s.url}\n\n${s.content || "(本文取得失敗)"}`)
+// ─── LLM 回答生成 ───────────────────────────────────────────────────────
+
+async function generateAnswerFromSources(latestUserMessage, collectedSlots, sources, authorName, isMultiQuestion = false) {
+  const sourceContext = sources
+    .map((s) => `## ${s.title}${s.url ? `\nURL: ${s.url}` : ""}\n\n${s.body || "(本文取得失敗)"}`)
     .join("\n\n---\n\n");
 
   const slotContext = [];
@@ -162,21 +210,16 @@ async function generateAnswerFromSources(latestUserMessage, collectedSlots, sour
 
   const userQuery = [latestUserMessage, ...slotContext].filter(Boolean).join(" / ");
 
-  const systemPrompt = `あなたはPtengineのサポートBotです。Help Center記事を参照して顧客の使い方質問に簡潔に回答してください。
+  const customerLabel = authorName ? `${authorName}様` : "お客様";
 
-ルール:
-- 公開Help Center記事の情報のみを根拠にする
-- 断定しすぎない（「〜から確認できます」「〜の手順が参考になります」程度）
-- 回答は300文字以内
-- 記事URLを最大2件まで案内してよい
-- 回答できる確信度を0.0〜1.0でつける (記事が的確なら0.8以上、部分的なら0.5〜0.7、無関係なら0.3以下)
+  const multiQuestionInstruction = isMultiQuestion
+    ? "顧客は複数の質問をしています。それぞれの質問に番号付きで回答してください（① ② ③ …）"
+    : "複数の記事が関連する場合は統合して箇条書きで回答する";
 
-出力はJSONのみ:
-{
-  "answer_message": "回答文（記事が無関係な場合はnull）",
-  "confidence": 0.75,
-  "reason": "根拠の説明"
-}`;
+  const systemPrompt = loadSkillPrompt("help-center-answer", {
+    customer_label: customerLabel,
+    multi_question_instruction: multiQuestionInstruction
+  });
 
   const res = await fetch(`${config.llm.baseUrl}/chat/completions`, {
     method: "POST",
@@ -209,19 +252,31 @@ async function generateAnswerFromSources(latestUserMessage, collectedSlots, sour
   }
 }
 
-const SUPPORTED_CATEGORIES = new Set(["usage_guidance", "experience_issue"]);
+// ─── メイン skill エントリ ───────────────────────────────────────────────
+
+const SUPPORTED_CATEGORIES = new Set([
+  "usage_guidance",
+  "experience_issue",
+  "login_account",
+  "billing_contract",
+  "general_inquiry"
+]);
 
 /**
  * usage_guidance / experience_issue 向け Help Center 回答 skill。
  *
  * 共通 skill interface を返す。信頼度閾値チェックは orchestrator が行う。
  *
- * @param {{ latestUserMessage: string, category: string, collectedSlots: object }} opts
- * @returns {Promise<SkillResult>}
+ * @param {{ latestUserMessage: string, category: string, collectedSlots: object, sourcePriorityProfile?: object }} opts
+ * @returns {Promise<object>}
  */
-export async function runHelpCenterAnswerSkill({ latestUserMessage, category, collectedSlots }) {
+export async function runHelpCenterAnswerSkill({ latestUserMessage, category, collectedSlots, authorName, sourcePriorityProfile }) {
   if (!SUPPORTED_CATEGORIES.has(category)) {
     return notHandled(`category ${category} is not supported by help_center_answer`);
+  }
+
+  if (sourcePriorityProfile?.allowedSources && !sourcePriorityProfile.allowedSources.includes("help_center")) {
+    return notHandled("help_center source not allowed by source_priority_profile");
   }
 
   if (!config.llm.apiKey) {
@@ -229,35 +284,62 @@ export async function runHelpCenterAnswerSkill({ latestUserMessage, category, co
   }
 
   const query = buildQuery(category, latestUserMessage, collectedSlots || {});
+  const questionSegments = extractQuestionSegments(latestUserMessage);
+  const isMultiQuestion = questionSegments.length > 1;
 
-  let candidates = [];
-  try {
-    candidates = await searchHelpCenter(query);
-  } catch (err) {
-    return notHandled(`search failed: ${err?.message}`);
+  // ── 1. knowledge_chunks テーブルを優先検索 ──────────────────────────────
+  let sources = [];
+  let retrievalMethod = "chunks";
+
+  if (isMultiQuestion) {
+    const perSegmentResults = await Promise.all(
+      questionSegments.map(q => searchFromChunks(buildQuery(category, q, collectedSlots || {})).catch(() => []))
+    );
+    const seen = new Set();
+    sources = perSegmentResults
+      .flat()
+      .filter(s => {
+        const key = s.url || s.title;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 4);
+  } else {
+    sources = await searchFromChunks(query);
   }
 
-  if (candidates.length === 0) {
-    return notHandled(`no candidates found | query:${query}`);
+  // ── 2. チャンクが空ならオンデマンドスクレイピングにフォールバック ──────
+  if (sources.length === 0) {
+    try {
+      sources = await searchFromWeb(query);
+      retrievalMethod = "scraping";
+    } catch (err) {
+      return notHandled(`search failed: ${err?.message}`);
+    }
   }
 
-  // 候補の観測情報 (faq_answer と同形式)
+  if (sources.length === 0) {
+    return notHandled(`no candidates found | method:${retrievalMethod} query:${query}`);
+  }
+
   const hcCandidateJson = JSON.stringify({
+    retrieval_method: retrievalMethod,
     retrieval_query: query,
-    candidate_count: candidates.length,
-    candidate_titles: candidates.map((c) => c.title)
+    candidate_count: sources.length,
+    candidate_titles: sources.map((s) => s.title)
   });
 
   let llmResult;
   try {
-    llmResult = await generateAnswerFromSources(latestUserMessage, collectedSlots || {}, candidates);
+    llmResult = await generateAnswerFromSources(latestUserMessage, collectedSlots || {}, sources, authorName || null, isMultiQuestion);
   } catch (err) {
     return {
       handled: false,
       answer_type: null,
       answer_message: null,
       confidence: 0,
-      sources: candidates,
+      sources: sources.map((s) => ({ title: s.title, url: s.url })),
       reason: `LLM failed: ${err?.message}`,
       answer_candidate_json: hcCandidateJson,
       should_escalate: false,
@@ -268,15 +350,13 @@ export async function runHelpCenterAnswerSkill({ latestUserMessage, category, co
   const confidence = typeof llmResult?.confidence === "number" ? llmResult.confidence : 0;
   const answer_message = llmResult?.answer_message || null;
 
-  // 候補が見つかり LLM が回答を生成した場合は handled=true。
-  // 閾値チェックは orchestrator で行うため、confidence が低くても handled=true を返す。
   if (answer_message) {
     return {
       handled: true,
       answer_type: SKILL_NAME,
       answer_message,
       confidence,
-      sources: candidates,
+      sources: sources.map((s) => ({ title: s.title, url: s.url })),
       reason: llmResult.reason || null,
       answer_candidate_json: hcCandidateJson,
       should_escalate: false,
@@ -289,7 +369,7 @@ export async function runHelpCenterAnswerSkill({ latestUserMessage, category, co
     answer_type: null,
     answer_message: null,
     confidence,
-    sources: candidates,
+    sources: sources.map((s) => ({ title: s.title, url: s.url })),
     reason: llmResult?.reason || "LLM returned no answer_message",
     answer_candidate_json: hcCandidateJson,
     should_escalate: false,

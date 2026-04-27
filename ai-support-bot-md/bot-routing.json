@@ -1,0 +1,111 @@
+{
+  "version": "1.0",
+  "description": "Bot skill routing — カテゴリごとに試行するスキルの順序と閾値を定義。コード変更なしでここだけ編集してデプロイすれば振る舞いが変わる。",
+  "routes": {
+    "usage_guidance": {
+      "description": "使い方・設定方法の質問",
+      "skills": [
+        {
+          "name": "help_center_answer",
+          "confidence_threshold": 0.65,
+          "description": "Ptengine Help Center を参照して使い方質問に回答する（最優先）"
+        },
+        {
+          "name": "faq_answer",
+          "confidence_threshold": 0.65,
+          "description": "Notion FAQ を参照して回答する（HC fallback）"
+        }
+      ]
+    },
+    "experience_issue": {
+      "description": "体験・表示・データ不具合",
+      "skills": [
+        {
+          "name": "faq_answer",
+          "confidence_threshold": 0.65,
+          "description": "Notion FAQ を参照して体験系問題を解決する（最優先: FAQ が問題解決型で豊富）"
+        },
+        {
+          "name": "help_center_answer",
+          "confidence_threshold": 0.65,
+          "description": "Ptengine Help Center を参照して回答する（FAQ fallback）"
+        }
+      ]
+    },
+    "bug_report": {
+      "description": "既知バグ・システム障害",
+      "skills": [
+        {
+          "name": "known_bug_match",
+          "confidence_threshold": 0.70,
+          "description": "support_ai_known_issues の既知バグ・制約と照合して顧客向けメッセージを返す"
+        }
+      ]
+    },
+    "login_account": {
+      "description": "ログイン・アカウント関連",
+      "skills": [
+        {
+          "name": "help_center_answer",
+          "confidence_threshold": 0.65,
+          "description": "Help Center でログイン・アカウント系の FAQ を即答する"
+        },
+        {
+          "name": "faq_answer",
+          "confidence_threshold": 0.65,
+          "description": "Notion FAQ でログイン・アカウント系の FAQ を即答する（HC fallback）"
+        }
+      ]
+    },
+    "billing_contract": {
+      "description": "料金・プラン・契約関連",
+      "skills": [
+        {
+          "name": "help_center_answer",
+          "confidence_threshold": 0.65,
+          "description": "Help Center でプラン・料金系の FAQ を即答する"
+        },
+        {
+          "name": "faq_answer",
+          "confidence_threshold": 0.65,
+          "description": "Notion FAQ でプラン・料金系の FAQ を即答する（HC fallback）"
+        }
+      ]
+    },
+    "tracking_issue": {
+      "description": "タグ計測・トラッキング問題",
+      "skills": [
+        {
+          "name": "known_bug_match",
+          "confidence_threshold": 0.65,
+          "description": "既知のトラッキング障害・制約と照合する"
+        },
+        {
+          "name": "faq_answer",
+          "confidence_threshold": 0.65,
+          "description": "タグ計測系 FAQ を参照して回答する"
+        },
+        {
+          "name": "help_center_answer",
+          "confidence_threshold": 0.65,
+          "description": "Help Center のタグ設置・計測記事を参照する"
+        }
+      ]
+    },
+    "report_difference": {
+      "description": "レポートデータの乖離・差異",
+      "skills": [
+        {
+          "name": "faq_answer",
+          "confidence_threshold": 0.65,
+          "description": "レポート乖離系 FAQ を参照して回答する"
+        },
+        {
+          "name": "help_center_answer",
+          "confidence_threshold": 0.65,
+          "description": "Help Center のレポート関連記事を参照する"
+        }
+      ]
+    }
+  }
+}

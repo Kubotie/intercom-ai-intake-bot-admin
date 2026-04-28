@@ -333,6 +333,25 @@ export type DailyStat = {
   skillAccepted: number;
 };
 
+export type WorkflowStatus = "draft" | "active" | "paused" | "archived";
+
+export type WorkflowDefinition = {
+  Id:                   number;
+  workflow_key:         string;
+  display_name:         string;
+  description:          string | null;
+  status:               WorkflowStatus;
+  scope_type:           string | null;
+  scope_value:          string | null;
+  root_concierge_key:   string | null;
+  notes:                string | null;
+  skill_config_json:    string | null;
+  handoff_config_json:  string | null;
+  policy_config_json:   string | null;
+  source_config_json:   string | null;
+  intents_config_json:  string | null;
+};
+
 export async function getDailyStats(days: number = 7): Promise<DailyStat[]> {
   const now = new Date();
   const dates: string[] = [];

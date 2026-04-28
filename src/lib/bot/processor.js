@@ -24,6 +24,7 @@ import { runSkillOrchestration } from "./skills/orchestrator.js";
 import { getActiveWorkflow, parseWorkflowOverrides, mergeWorkflowSkillProfile, resolveHandoffPreset, resolveIntentConfig, resolveEscalationKeywords } from "./workflow-resolver.js";
 import { resolveExecutionProfile } from "./concierge-profiles.js";
 import { buildHandoffSummary } from "./handoff-summary.js";
+import { enrichContactFromUrl } from "./project-enrichment.js";
 
 // ─────────────────────────────────────────────
 // self-reply loop prevention (2段構え)
@@ -472,6 +473,19 @@ export async function processIntercomWebhook(payload) {
       is_retry_candidate: event.event_topic === "conversation.user.created"
     });
     return;
+  }
+
+  // ── 4.5. project enrichment (conversation.user.created のみ) ──────────
+  if (event.event_topic === "conversation.user.created" && event.intercom_contact_id) {
+    const sourceUrl = rawSrc?.url ?? null;
+    logger.info("project-enrichment: source url", { sourceUrl, contact_id: event.intercom_contact_id, ...ctx });
+    if (sourceUrl) {
+      await enrichContactFromUrl(event.intercom_contact_id, sourceUrl).catch(err =>
+        logger.warn("project-enrichment failed (non-fatal)", { error: err?.message, ...ctx })
+      );
+    } else {
+      logger.info("project-enrichment: skipped (no source url)", ctx);
+    }
   }
 
   // ── 5. session upsert ───────────────────────

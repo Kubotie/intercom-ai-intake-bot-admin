@@ -30,3 +30,10 @@ export async function replyToConversation(conversationId, messageBody, adminId) 
     })
   });
 }
+
+export async function updateContactAttributes(contactId, customAttributes) {
+  return icFetch(`/contacts/${contactId}`, {
+    method: "PUT",
+    body: JSON.stringify({ custom_attributes: customAttributes })
+  });
+}

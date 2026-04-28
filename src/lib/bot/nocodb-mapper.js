@@ -9,6 +9,11 @@
 //     filled_slots_count, missing_slots_count, reply_preview
 //     customer_intent_summary, recommended_next_step, decision_trace
 // 列が存在しない場合、NocoDB は UPDATE を silently ignore する (エラーなし・保存なし)。
+// reply_source の許可値 (NocoDB の Single Select に登録済みの値と同期すること)
+const VALID_REPLY_SOURCES = new Set([
+  "help_center_answer", "faq_answer", "known_bug_match", "soft_answer",
+  "next_message", "handoff", "escalation", "fallback", "already_handed_off"
+]);
 
 // category → 顧客意図の日本語ラベル (handoff-summary.js と同値; 変更するときは両方直す)
 const CATEGORY_INTENT_LABEL = {
@@ -111,8 +116,9 @@ export function buildSessionObservabilityFields({ answerCandidateJson, finalSumm
   const filled_slots_count  = acj?.filled_slots_count  ?? fsj?.filled_slots_count  ?? null;
   const missing_slots_count = acj?.missing_slots_count ?? fsj?.missing_slots_count ?? null;
 
-  // final_summary_json 由来
-  const reply_source   = fsj?.reply_source ?? null;
+  // final_summary_json 由来 (NocoDB Select 許可値のみ送る)
+  const rawReplySource = fsj?.reply_source ?? null;
+  const reply_source   = rawReplySource && VALID_REPLY_SOURCES.has(rawReplySource) ? rawReplySource : null;
   // decision_trace は fsj 優先 (より新しい情報), 次に acj
   const decision_trace = fsj?.decision_trace ?? acj?.decision_trace ?? null;
 

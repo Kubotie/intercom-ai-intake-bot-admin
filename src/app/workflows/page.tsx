@@ -314,10 +314,10 @@ export default function WorkflowsPage() {
                         {!isArchived && (
                           <>
                             <Link
-                              href={`/intents?workflow_key=${wf.workflow_key}&edit=1`}
+                              href={`/workflows/${wf.workflow_key}`}
                               className="text-xs px-2 py-1 bg-violet-50 text-violet-700 border border-violet-200 rounded hover:bg-violet-100"
                             >
-                              編集する
+                              キャンバスを開く
                             </Link>
                             <button
                               onClick={() => { setEditId(wf.Id); setEditForm({}); }}

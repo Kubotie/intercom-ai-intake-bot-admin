@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, MessageSquare, Star, FileText,
-  GitBranch, Zap, BookOpen, Users, ScrollText, FlaskConical, Settings, Bot, TestTube2,
+  Zap, BookOpen, Users, ScrollText, FlaskConical, Settings, Bot, TestTube2,
   User, LogOut, Network, PenLine,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -15,7 +15,6 @@ const ALL_NAV = [
   { href: "/evaluation",     icon: Star,            label: "Evaluation" },
   { href: "/policies",       icon: FileText,        label: "Policies" },
   { href: "/workflows",      icon: Network,         label: "Workflows" },
-  { href: "/intents",        icon: GitBranch,       label: "Intents & Routing" },
   { href: "/skills",         icon: Zap,             label: "Skills" },
   { href: "/prompts",        icon: PenLine,         label: "Prompts" },
   { href: "/knowledge",      icon: BookOpen,        label: "Knowledge" },

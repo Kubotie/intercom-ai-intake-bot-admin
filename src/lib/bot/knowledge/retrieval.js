@@ -20,7 +20,7 @@ import { searchHelpCenter, fetchArticleBodyFromUrl } from "../skills/help-center
 import { searchChunks } from "./chunks.js";
 import { canExposeKnowledgeToCustomer } from "./policy-gate.js";
 
-const DEFAULT_ALLOWED_SOURCE_TYPES = ["help_center", "notion_faq"];
+const DEFAULT_ALLOWED_SOURCE_TYPES = ["help_center", "notion_faq", "qa_pair", "knowledge_doc"];
 
 /**
  * @typedef {Object} KnowledgeCandidate
@@ -85,6 +85,12 @@ async function fetchBySourceType(sourceType, query, collectedSlots, limit) {
 
     case "known_issue":
       return fetchFromChunks("known_issue", query, limit);
+
+    case "qa_pair":
+      return fetchFromChunks("qa_pair", query, limit);
+
+    case "knowledge_doc":
+      return fetchFromChunks("knowledge_doc", query, limit);
 
     default:
       return [];

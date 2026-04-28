@@ -98,7 +98,7 @@ export async function runFaqAnswerSkill({ latestUserMessage, category, collected
             category,
             latestUserMessage: q,
             collectedSlots: collectedSlots || {},
-            allowedSourceTypes: ["notion_faq"],
+            allowedSourceTypes: ["notion_faq", "qa_pair", "knowledge_doc"],
             limit: 3
           }).catch(() => [])
         )
@@ -120,7 +120,7 @@ export async function runFaqAnswerSkill({ latestUserMessage, category, collected
         category,
         latestUserMessage,
         collectedSlots: collectedSlots || {},
-        allowedSourceTypes: ["notion_faq"],
+        allowedSourceTypes: ["notion_faq", "qa_pair", "knowledge_doc"],
         limit: 5
       });
       candidates = filterExposable(all);

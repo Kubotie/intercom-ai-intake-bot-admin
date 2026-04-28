@@ -17,10 +17,12 @@
 
 /** 顧客に直接返してよい source_type のデフォルトポリシー */
 const DEFAULT_EXPOSURE_POLICY = {
-  help_center:  true,
-  notion_faq:   false, // published_to_bot フラグで個別判定
-  known_issue:  false, // published_to_bot フラグで個別判定
-  notion_cse:   false  // 内部補助のみ — 変更不可
+  help_center:    true,
+  notion_faq:     false, // published_to_bot フラグで個別判定
+  known_issue:    false, // published_to_bot フラグで個別判定
+  notion_cse:     false, // 内部補助のみ — 変更不可
+  qa_pair:        false, // published_to_bot フラグで個別判定
+  knowledge_doc:  true   // 公開済みHelp Center記事スナップショット — 常に顧客返答可
 };
 
 /**
@@ -41,8 +43,13 @@ export function canExposeKnowledgeToCustomer({ sourceType, publishedToBot }) {
       return publishedToBot === true;
 
     case "known_issue":
+    case "qa_pair":
       // published_to_bot=true のものだけ顧客返答可
       return publishedToBot === true;
+
+    case "knowledge_doc":
+      // 公開済み Help Center 記事スナップショット — 常に顧客返答可
+      return true;
 
     case "notion_cse":
       // 内部補助のみ — 絶対に顧客には返さない

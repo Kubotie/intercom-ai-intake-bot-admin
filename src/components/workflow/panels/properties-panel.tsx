@@ -73,6 +73,7 @@ export function PropertiesPanel({
               classifyPriority: intentCfg?.classifyPriority,
               classifyBoundaryNotes: intentCfg?.classifyBoundaryNotes,
             }}
+            allIntentConfigs={editorConfig?.intentsConfig.intents}
             onClose={onClose}
             onSave={onSaveIntentDesc ? (desc) => onSaveIntentDesc(node.id, desc) : undefined}
             onSaveNLInstruction={onSaveIntentNLInstruction

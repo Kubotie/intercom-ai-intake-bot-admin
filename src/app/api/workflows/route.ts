@@ -22,9 +22,12 @@ export async function POST(req: NextRequest) {
     scope_type:          body.scope_type ?? "global",
     scope_value:         body.scope_value ?? null,
     root_concierge_key:  body.root_concierge_key ?? null,
-    routing_config_json: body.routing_config_json ?? null,
-    skill_config_json:   body.skill_config_json ?? null,
-    handoff_config_json: body.handoff_config_json ?? null,
+    routing_config_json: body.routing_config_json  ?? null,
+    skill_config_json:   body.skill_config_json    ?? null,
+    handoff_config_json: body.handoff_config_json  ?? null,
+    policy_config_json:  body.policy_config_json   ?? null,
+    source_config_json:  body.source_config_json   ?? null,
+    intents_config_json: body.intents_config_json  ?? null,
     notes:               body.notes ?? null,
   };
   const res = await fetch(`${BASE}/api/v2/tables/${TBL}/records`, {

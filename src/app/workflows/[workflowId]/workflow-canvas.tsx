@@ -125,7 +125,8 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rfInstanceRef = useRef<any>(null);
 
-  const [editMode, setEditMode] = useState(urlEditMode);
+  const [editMode,         setEditMode]         = useState(urlEditMode);
+  const [editorInitialTab, setEditorInitialTab] = useState<"intents" | "skill" | "handoff" | "policy" | "source">("intents");
 
   const [selectedWorkflowKey, setSelectedWorkflowKey] = useState<string | null>(
     () => urlWorkflowKey ?? initialWorkflowKey ?? workflows.find(w => w.status === "active")?.workflow_key ?? null
@@ -638,6 +639,11 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
           editorConfig={editorConfig}
           onSkillThresholdChange={selectedWorkflow ? handleSkillThresholdChange : undefined}
           onHandoffPresetChange={selectedWorkflow ? handleHandoffPresetChange : undefined}
+          onOpenPolicyEditor={selectedWorkflow ? () => {
+            setSelectedNode(null);
+            setEditorInitialTab("policy");
+            setEditMode(true);
+          } : undefined}
         />
       )}
 
@@ -674,7 +680,9 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
           isSaving={isSaving}
           onChange={handleEditorChange}
           onSave={handleSaveWorkflow}
-          onClose={() => setEditMode(false)}
+          onClose={() => { setEditMode(false); setEditorInitialTab("intents"); }}
+          initialTab={editorInitialTab}
+          conciergeKeys={conciergeKeys}
         />
       )}
     </div>

@@ -21,12 +21,13 @@ interface Props {
   editorConfig?: WorkflowEditorConfig;
   onSkillThresholdChange?: (category: string, skillName: string, threshold: number) => void;
   onHandoffPresetChange?: (category: string, preset: HandoffPreset) => void;
+  onOpenPolicyEditor?: () => void;
 }
 
 export function PropertiesPanel({
   node, conciergeKeys, onClose, onSaved,
   onSaveIntentDesc, onSaveIntentNLInstruction, onSaveIntentClassifyConfig, editorConfig,
-  onSkillThresholdChange, onHandoffPresetChange,
+  onSkillThresholdChange, onHandoffPresetChange, onOpenPolicyEditor,
 }: Props) {
   if (!node) return null;
 
@@ -117,6 +118,8 @@ export function PropertiesPanel({
         <TerminalPanel
           data={node.data as TerminalNodeData}
           onClose={onClose}
+          policyConfig={editorConfig?.policyConfig}
+          onOpenPolicyEditor={onOpenPolicyEditor}
         />
       )}
       {node.type === "entry" && (

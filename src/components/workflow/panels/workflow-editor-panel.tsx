@@ -3,22 +3,25 @@ import { useState } from "react";
 import { AlertTriangle, Save } from "lucide-react";
 import type { WorkflowDefinition } from "@/lib/nocodb";
 import type { WorkflowEditorConfig } from "@/lib/workflow-editor-types";
-import { SkillOrderEditor }    from "@/components/workflow/editors/skill-order-editor";
-import { HandoffConfigEditor } from "@/components/workflow/editors/handoff-config-editor";
-import { PolicyConfigEditor }  from "@/components/workflow/editors/policy-config-editor";
-import { SourceConfigEditor }  from "@/components/workflow/editors/source-config-editor";
-import { IntentConfigEditor }  from "@/components/workflow/editors/intent-config-editor";
+import { SkillOrderEditor }       from "@/components/workflow/editors/skill-order-editor";
+import { HandoffConfigEditor }    from "@/components/workflow/editors/handoff-config-editor";
+import { PolicyConfigEditor }     from "@/components/workflow/editors/policy-config-editor";
+import { SourceConfigEditor }     from "@/components/workflow/editors/source-config-editor";
+import { IntentConfigEditor }     from "@/components/workflow/editors/intent-config-editor";
+import { ConciergeToolsEditor }   from "@/components/workflow/editors/concierge-tools-editor";
 
-type EditorTab = "intents" | "skill" | "handoff" | "policy" | "source";
+type EditorTab = "intents" | "skill" | "handoff" | "policy" | "source" | "tools";
 
 interface Props {
-  workflow:  WorkflowDefinition;
-  config:    WorkflowEditorConfig;
-  isDirty:   boolean;
-  isSaving:  boolean;
-  onChange:  (config: WorkflowEditorConfig) => void;
-  onSave:    () => void;
-  onClose:   () => void;
+  workflow:       WorkflowDefinition;
+  config:         WorkflowEditorConfig;
+  isDirty:        boolean;
+  isSaving:       boolean;
+  onChange:       (config: WorkflowEditorConfig) => void;
+  onSave:         () => void;
+  onClose:        () => void;
+  initialTab?:    EditorTab;
+  conciergeKeys?: string[];
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -30,14 +33,15 @@ const STATUS_BADGE: Record<string, string> = {
 
 const TABS: { key: EditorTab; label: string }[] = [
   { key: "intents", label: "インテント" },
+  { key: "tools",   label: "ツール" },
   { key: "skill",   label: "スキル順序" },
   { key: "handoff", label: "Handoff" },
   { key: "policy",  label: "ポリシー" },
   { key: "source",  label: "ソース" },
 ];
 
-export function WorkflowEditorPanel({ workflow, config, isDirty, isSaving, onChange, onSave, onClose }: Props) {
-  const [tab, setTab] = useState<EditorTab>("intents");
+export function WorkflowEditorPanel({ workflow, config, isDirty, isSaving, onChange, onSave, onClose, initialTab, conciergeKeys = [] }: Props) {
+  const [tab, setTab] = useState<EditorTab>(initialTab ?? "intents");
 
   const isArchived = workflow.status === "archived";
   const isActive   = workflow.status === "active";
@@ -101,6 +105,13 @@ export function WorkflowEditorPanel({ workflow, config, isDirty, isSaving, onCha
           {tab === "intents" && (
             <IntentConfigEditor
               config={config.intentsConfig}
+              onChange={intentsConfig => onChange({ ...config, intentsConfig })}
+            />
+          )}
+          {tab === "tools" && (
+            <ConciergeToolsEditor
+              config={config.intentsConfig}
+              conciergeKeys={conciergeKeys}
               onChange={intentsConfig => onChange({ ...config, intentsConfig })}
             />
           )}

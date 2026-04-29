@@ -68,9 +68,31 @@ export type IntentCategoryConfig = {
   classifyBoundaryNotes?: string; // 境界判定メモ（他カテゴリとの区別）
 };
 
+// ── Concierge tools ───────────────────────────────────────────────────────────
+
+export type AvailableTool = "page-loading" | "image-reading" | "image-referencing";
+
+export const TOOL_META: Record<AvailableTool, { label: string; desc: string }> = {
+  "page-loading": {
+    label: "ページ読み込み",
+    desc: "ユーザーが提供したURLをフェッチし、ページのHTTPステータスやタイトルをLLMに提供します。リンク切れや503の確認に有効。",
+  },
+  "image-reading": {
+    label: "画像読み込み",
+    desc: "Intercom会話に添付された画像をClaudeのvision APIで解析し、スクリーンショットの内容をLLMが理解して回答に活用します。",
+  },
+  "image-referencing": {
+    label: "画像参照",
+    desc: "ヘルプドキュメントやナレッジベースの画像URLを回答のマークダウンに含めることを許可します。視覚的なガイダンスを提供できます。",
+  },
+};
+
+export const ALL_TOOLS: AvailableTool[] = ["page-loading", "image-reading", "image-referencing"];
+
 export type IntentsConfigJson = {
   version: 1;
   intents: Record<string, IntentCategoryConfig>;
+  concierge_tools?: Record<string, AvailableTool[]>;
 };
 
 // ── Editor aggregate ──────────────────────────────────────────────────────────
@@ -111,6 +133,7 @@ export const DEFAULT_SOURCE_CONFIG: SourceConfigJson = {
 export const DEFAULT_INTENTS_CONFIG: IntentsConfigJson = {
   version: 1,
   intents: {},
+  concierge_tools: {},
 };
 
 // ── Parser ────────────────────────────────────────────────────────────────────

@@ -682,6 +682,7 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
           onSave={handleSaveWorkflow}
           onClose={() => { setEditMode(false); setEditorInitialTab("intents"); }}
           initialTab={editorInitialTab}
+          conciergeKeys={conciergeKeys}
         />
       )}
     </div>

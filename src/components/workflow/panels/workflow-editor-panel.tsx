@@ -12,13 +12,14 @@ import { IntentConfigEditor }  from "@/components/workflow/editors/intent-config
 type EditorTab = "intents" | "skill" | "handoff" | "policy" | "source";
 
 interface Props {
-  workflow:  WorkflowDefinition;
-  config:    WorkflowEditorConfig;
-  isDirty:   boolean;
-  isSaving:  boolean;
-  onChange:  (config: WorkflowEditorConfig) => void;
-  onSave:    () => void;
-  onClose:   () => void;
+  workflow:     WorkflowDefinition;
+  config:       WorkflowEditorConfig;
+  isDirty:      boolean;
+  isSaving:     boolean;
+  onChange:     (config: WorkflowEditorConfig) => void;
+  onSave:       () => void;
+  onClose:      () => void;
+  initialTab?:  EditorTab;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -36,8 +37,8 @@ const TABS: { key: EditorTab; label: string }[] = [
   { key: "source",  label: "ソース" },
 ];
 
-export function WorkflowEditorPanel({ workflow, config, isDirty, isSaving, onChange, onSave, onClose }: Props) {
-  const [tab, setTab] = useState<EditorTab>("intents");
+export function WorkflowEditorPanel({ workflow, config, isDirty, isSaving, onChange, onSave, onClose, initialTab }: Props) {
+  const [tab, setTab] = useState<EditorTab>(initialTab ?? "intents");
 
   const isArchived = workflow.status === "archived";
   const isActive   = workflow.status === "active";

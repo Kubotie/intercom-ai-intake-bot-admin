@@ -61,6 +61,11 @@ export type IntentCategoryConfig = {
   handoff: IntentHandoffConfig;
   skills: IntentSkillEntry[];
   nlInstruction?: string;
+  // 分類設定: LLM によるインテント分類に使用
+  classifyDescription?: string;   // このカテゴリはどんな問い合わせか（自然言語）
+  classifyExamples?: string[];    // 該当する発話例
+  classifyPriority?: number;      // 分類優先度 (大きいほど優先, デフォルト: 5)
+  classifyBoundaryNotes?: string; // 境界判定メモ（他カテゴリとの区別）
 };
 
 export type IntentsConfigJson = {

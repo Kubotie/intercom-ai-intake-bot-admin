@@ -5,6 +5,7 @@ import type { WorkflowEditorConfig, HandoffPreset } from "@/lib/workflow-editor-
 import { ConciergePanel }    from "./concierge-panel";
 import { TestTargetPanel }   from "./test-target-panel";
 import { IntentPanel }       from "./intent-panel";
+import type { ClassifyConfig } from "./intent-panel";
 import { HandoffCheckPanel } from "./handoff-check-panel";
 import { SkillPanel }        from "./skill-panel";
 import { TerminalPanel }     from "./terminal-panel";
@@ -16,6 +17,7 @@ interface Props {
   onSaved: () => void;
   onSaveIntentDesc?: (nodeId: string, naturalLanguageDesc: string) => void;
   onSaveIntentNLInstruction?: (nodeId: string, category: string, nlInstruction: string) => void;
+  onSaveIntentClassifyConfig?: (nodeId: string, category: string, config: ClassifyConfig) => void;
   editorConfig?: WorkflowEditorConfig;
   onSkillThresholdChange?: (category: string, skillName: string, threshold: number) => void;
   onHandoffPresetChange?: (category: string, preset: HandoffPreset) => void;
@@ -23,7 +25,7 @@ interface Props {
 
 export function PropertiesPanel({
   node, conciergeKeys, onClose, onSaved,
-  onSaveIntentDesc, onSaveIntentNLInstruction, editorConfig,
+  onSaveIntentDesc, onSaveIntentNLInstruction, onSaveIntentClassifyConfig, editorConfig,
   onSkillThresholdChange, onHandoffPresetChange,
 }: Props) {
   if (!node) return null;
@@ -58,17 +60,30 @@ export function PropertiesPanel({
           onSaved={onSaved}
         />
       )}
-      {node.type === "intent" && (
-        <IntentPanel
-          data={node.data as IntentNodeData}
-          nlInstruction={editorConfig?.intentsConfig.intents[(node.data as IntentNodeData).category]?.nlInstruction}
-          onClose={onClose}
-          onSave={onSaveIntentDesc ? (desc) => onSaveIntentDesc(node.id, desc) : undefined}
-          onSaveNLInstruction={onSaveIntentNLInstruction
-            ? (nl) => onSaveIntentNLInstruction(node.id, (node.data as IntentNodeData).category, nl)
-            : undefined}
-        />
-      )}
+      {node.type === "intent" && (() => {
+        const intentData = node.data as IntentNodeData;
+        const intentCfg = editorConfig?.intentsConfig.intents[intentData.category];
+        return (
+          <IntentPanel
+            data={intentData}
+            nlInstruction={intentCfg?.nlInstruction}
+            classifyConfig={{
+              classifyDescription: intentCfg?.classifyDescription,
+              classifyExamples: intentCfg?.classifyExamples,
+              classifyPriority: intentCfg?.classifyPriority,
+              classifyBoundaryNotes: intentCfg?.classifyBoundaryNotes,
+            }}
+            onClose={onClose}
+            onSave={onSaveIntentDesc ? (desc) => onSaveIntentDesc(node.id, desc) : undefined}
+            onSaveNLInstruction={onSaveIntentNLInstruction
+              ? (nl) => onSaveIntentNLInstruction(node.id, intentData.category, nl)
+              : undefined}
+            onSaveClassifyConfig={onSaveIntentClassifyConfig
+              ? (cfg) => onSaveIntentClassifyConfig(node.id, intentData.category, cfg)
+              : undefined}
+          />
+        );
+      })()}
       {node.type === "handoffCheck" && (
         <HandoffCheckPanel
           data={node.data as HandoffCheckNodeData}

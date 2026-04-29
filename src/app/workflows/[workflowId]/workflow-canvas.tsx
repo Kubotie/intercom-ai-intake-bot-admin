@@ -419,6 +419,34 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
     setIsDirty(true);
   }, [setEditorConfig, setIsDirty]);
 
+  const handleIntentClassifyConfigSave = useCallback((_nodeId: string, category: string, cfg: { classifyDescription: string; classifyExamples: string[]; classifyPriority: number; classifyBoundaryNotes: string }) => {
+    setEditorConfig(prev => {
+      const existing = prev.intentsConfig.intents[category] ?? {
+        enabled: true,
+        slots: { required: [], optional: [], priority: [] },
+        handoff: { preset: "balanced" as HandoffPreset, required: [], any_of: [] },
+        skills: [],
+      };
+      return {
+        ...prev,
+        intentsConfig: {
+          ...prev.intentsConfig,
+          intents: {
+            ...prev.intentsConfig.intents,
+            [category]: {
+              ...existing,
+              classifyDescription: cfg.classifyDescription,
+              classifyExamples: cfg.classifyExamples,
+              classifyPriority: cfg.classifyPriority,
+              classifyBoundaryNotes: cfg.classifyBoundaryNotes,
+            },
+          },
+        },
+      };
+    });
+    setIsDirty(true);
+  }, [setEditorConfig, setIsDirty]);
+
   const handleSkillThresholdChange = useCallback((category: string, skillName: string, threshold: number) => {
     setEditorConfig(prev => {
       const intents = { ...prev.intentsConfig.intents };
@@ -598,6 +626,7 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
           onSaved={handleSaved}
           onSaveIntentDesc={handleIntentDescSave}
           onSaveIntentNLInstruction={selectedWorkflow ? handleIntentNLInstructionSave : undefined}
+          onSaveIntentClassifyConfig={selectedWorkflow ? handleIntentClassifyConfigSave : undefined}
           editorConfig={editorConfig}
           onSkillThresholdChange={selectedWorkflow ? handleSkillThresholdChange : undefined}
           onHandoffPresetChange={selectedWorkflow ? handleHandoffPresetChange : undefined}

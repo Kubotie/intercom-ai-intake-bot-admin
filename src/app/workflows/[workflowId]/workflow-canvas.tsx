@@ -160,6 +160,14 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedWorkflowKey]);
 
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isDirty) { e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
   // ── Persist positions ─────────────────────────────────────────────────────────
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

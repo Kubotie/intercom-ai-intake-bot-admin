@@ -43,17 +43,23 @@ function CategoryEditor({ category, intentConfig, isTemplate, onChange, onDelete
 
   const hasClassifyConfig = !!(intentConfig.classifyDescription || intentConfig.classifyExamples?.length || intentConfig.classifyBoundaryNotes);
 
-  // スキルトグル（テンプレートカテゴリでスキルが定義されている場合のみ表示）
-  const availableSkills = INTENT_META[category]?.skills ?? [];
+  // スキルトグル
+  // テンプレートカテゴリ: INTENT_META に定義されたスキルのみ選択可能
+  // カスタムカテゴリ: SKILL_LABELS の全スキルから選択可能
+  const availableSkills = isTemplate
+    ? (INTENT_META[category]?.skills ?? [])
+    : Object.keys(SKILL_LABELS);
   const activeSkillNames = new Set(
     (intentConfig.skills ?? []).length > 0
       ? (intentConfig.skills ?? []).map(s => s.name)
-      : availableSkills
+      : (isTemplate ? availableSkills : [])  // テンプレート: INTENT_META デフォルト / カスタム: 空
   );
   const toggleSkill = (skillName: string, checked: boolean) => {
     const base = (intentConfig.skills ?? []).length > 0
       ? intentConfig.skills
-      : availableSkills.map(name => ({ name, threshold: SKILL_THRESHOLDS[name] ?? 0.65 }));
+      : (isTemplate
+          ? availableSkills.map(name => ({ name, threshold: SKILL_THRESHOLDS[name] ?? 0.65 }))
+          : []);  // カスタムカテゴリは空から開始
     const newSkills = checked
       ? [...base.filter(s => s.name !== skillName), { name: skillName, threshold: SKILL_THRESHOLDS[skillName] ?? 0.65 }]
       : base.filter(s => s.name !== skillName);
@@ -119,7 +125,7 @@ function CategoryEditor({ category, intentConfig, isTemplate, onChange, onDelete
             )}
           </div>
 
-          {/* Skill toggles — template categories with skills only */}
+          {/* Skill toggles */}
           {availableSkills.length > 0 && (
             <div>
               <label className="block text-[11px] font-medium text-zinc-600 mb-1.5">使用するスキル</label>
@@ -136,7 +142,11 @@ function CategoryEditor({ category, intentConfig, isTemplate, onChange, onDelete
                   </label>
                 ))}
               </div>
-              <p className="text-[10px] text-zinc-400 mt-1">キャンバスと bot 処理フローに反映されます</p>
+              <p className="text-[10px] text-zinc-400 mt-1">
+                {isTemplate
+                  ? "キャンバスと bot 処理フローに反映されます"
+                  : "選択するとキャンバスにスキルノードが追加され、ナレッジベース検索が有効になります"}
+              </p>
             </div>
           )}
 

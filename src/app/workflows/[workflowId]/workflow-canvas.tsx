@@ -87,8 +87,17 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
   const urlWorkflowKey = searchParams.get("workflow_key");
   const urlEditMode    = searchParams.get("edit") === "1";
 
+  // buildLayout は useMemo より前に宣言されるため、editorConfig (useState) を直接参照できない。
+  // マウント時の intentsConfig を先に計算し、buildLayout クロージャに渡す。
+  const _initialWf = workflows.find(
+    w => w.workflow_key === (urlWorkflowKey ?? initialWorkflowKey ?? workflows.find(w2 => w2.status === "active")?.workflow_key)
+  );
+  const _initialIntentsConfig = _initialWf
+    ? parseEditorConfig(_initialWf).intentsConfig
+    : { ...DEFAULT_INTENTS_CONFIG };
+
   const buildLayout = useCallback(
-    () => buildInitialLayout(concierges, testTargets, editorConfig.intentsConfig),
+    () => buildInitialLayout(concierges, testTargets, _initialIntentsConfig),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []  // マウント時の intentsConfig（保存済み設定）でレイアウトを確定
   );

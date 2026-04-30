@@ -11,6 +11,7 @@ const TABLES = {
   concierges:       process.env.NOCODB_CONCIERGES_TABLE_ID ?? "",
   testTargets:      process.env.NOCODB_TEST_TARGETS_TABLE_ID ?? "",
   rolloutRules:     process.env.NOCODB_ROLLOUT_RULES_ID ?? "",
+  skills:           process.env.NOCODB_SKILLS_TABLE_ID ?? "",
 };
 
 export type Session = {
@@ -351,6 +352,50 @@ export type WorkflowDefinition = {
   source_config_json:   string | null;
   intents_config_json:  string | null;
 };
+
+export type SkillDefinition = {
+  Id:              number;
+  skill_key:       string;
+  label:           string;
+  description:     string | null;
+  source_type:     "knowledge_chunks_search" | "keyword_match" | string;
+  source_config:   string | null;
+  prompt_template: string | null;
+  threshold:       number;
+  status:          "active" | "disabled" | "planned";
+  intents:         string | null;
+  CreatedAt:       string;
+  UpdatedAt:       string;
+};
+
+async function ncMutate(tableId: string, method: "POST" | "PATCH" | "DELETE", body: object): Promise<Response> {
+  return fetch(`${BASE}/api/v2/tables/${tableId}/records`, {
+    method,
+    headers: { "xc-token": TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getSkills(): Promise<SkillDefinition[]> {
+  if (!TABLES.skills) return [];
+  const res = await ncFetch<SkillDefinition>(TABLES.skills, { limit: 100, sort: "CreatedAt" });
+  return res.list;
+}
+
+export async function createSkill(data: Omit<SkillDefinition, "Id" | "CreatedAt" | "UpdatedAt">): Promise<void> {
+  if (!TABLES.skills) throw new Error("NOCODB_SKILLS_TABLE_ID not configured");
+  await ncMutate(TABLES.skills, "POST", data);
+}
+
+export async function updateSkill(rowId: number, data: Partial<SkillDefinition>): Promise<void> {
+  if (!TABLES.skills) throw new Error("NOCODB_SKILLS_TABLE_ID not configured");
+  await ncMutate(TABLES.skills, "PATCH", { Id: rowId, ...data });
+}
+
+export async function deleteSkill(rowId: number): Promise<void> {
+  if (!TABLES.skills) throw new Error("NOCODB_SKILLS_TABLE_ID not configured");
+  await ncMutate(TABLES.skills, "DELETE", { Id: rowId });
+}
 
 export async function getDailyStats(days: number = 7): Promise<DailyStat[]> {
   const now = new Date();

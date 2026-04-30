@@ -126,7 +126,7 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
   const rfInstanceRef = useRef<any>(null);
 
   const [editMode,         setEditMode]         = useState(urlEditMode);
-  const [editorInitialTab, setEditorInitialTab] = useState<"intents" | "skill" | "handoff" | "policy" | "source">("intents");
+  const [editorInitialTab, setEditorInitialTab] = useState<"intents" | "behavior" | "tools" | "source">("intents");
 
   const [selectedWorkflowKey, setSelectedWorkflowKey] = useState<string | null>(
     () => urlWorkflowKey ?? initialWorkflowKey ?? workflows.find(w => w.status === "active")?.workflow_key ?? null
@@ -641,7 +641,7 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
           onHandoffPresetChange={selectedWorkflow ? handleHandoffPresetChange : undefined}
           onOpenPolicyEditor={selectedWorkflow ? () => {
             setSelectedNode(null);
-            setEditorInitialTab("policy");
+            setEditorInitialTab("behavior");
             setEditMode(true);
           } : undefined}
         />

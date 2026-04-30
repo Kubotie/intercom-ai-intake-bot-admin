@@ -525,20 +525,20 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
           maskColor="rgba(244,244,246,0.7)"
         />
         <Panel position="top-right">
-          <div className="bg-white/95 border border-zinc-200 rounded-lg px-3 py-2.5 shadow-sm text-xs space-y-2" style={{ width: 210 }}>
-            <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide">凡例</p>
+          <div className="bg-white/95 border border-zinc-200 rounded-lg px-3 py-2.5 shadow-sm text-xs space-y-2.5" style={{ width: 220 }}>
+            <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide">このキャンバスについて</p>
             <div className="flex items-start gap-2">
               <span className="text-slate-500 text-sm leading-none mt-0.5">⇄</span>
               <div>
-                <p className="font-semibold text-slate-700 text-[11px]">ルーティング設定</p>
-                <p className="text-zinc-400 text-[10px] leading-snug">テスト対象・コンシェルジュの接続を設定</p>
+                <p className="font-semibold text-slate-700 text-[11px]">クリックして設定できるノード</p>
+                <p className="text-zinc-400 text-[10px] leading-snug mt-0.5">受付対象・コンシェルジュの割り振りを変更できます</p>
               </div>
             </div>
-            <div className="flex items-start gap-2 pt-0.5 border-t border-zinc-100">
+            <div className="flex items-start gap-2 pt-1.5 border-t border-zinc-100">
               <span className="text-zinc-400 text-sm leading-none mt-0.5">↻</span>
               <div>
-                <p className="font-semibold text-zinc-500 text-[11px]">処理フロー <span className="font-normal text-zinc-400">（参照用）</span></p>
-                <p className="text-zinc-400 text-[10px] leading-snug">自動生成・直接編集不可</p>
+                <p className="font-semibold text-zinc-500 text-[11px]">設定から自動生成されるノード</p>
+                <p className="text-zinc-400 text-[10px] leading-snug mt-0.5">「編集」ボタンからインテント・スキルを変更すると反映されます</p>
               </div>
             </div>
           </div>

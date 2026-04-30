@@ -5,9 +5,8 @@
 // このファイルはスキル名 → 実行関数のマッピングのみを持つ。
 //
 // 新しい skill を追加するとき:
-//   1. src/lib/bot/skills/ に skill ファイルを追加する
-//   2. SKILL_RUNNERS にエントリーを追加する
-//   3. ai-support-bot-md/bot-routing.json の該当カテゴリに name を追加する
+//   1. src/lib/bot/skills/ に skill ファイルを追加する（静的スキル）
+//   2. または NocoDB の support_ai_skills テーブルに登録する（動的スキル）
 // ─────────────────────────────────────────────
 
 import { readFileSync } from "fs";
@@ -15,6 +14,8 @@ import path from "path";
 import { runHelpCenterAnswerSkill } from "./help-center-answer.js";
 import { runFaqAnswerSkill } from "./faq-answer.js";
 import { runKnownBugMatchSkill } from "./known-bug-match.js";
+import { runDynamicSkill } from "./dynamic-skill-runner.js";
+import { listActiveSkills } from "../nocodb-repo.js";
 
 const ROUTING_CONFIG_PATH = path.join(process.cwd(), "ai-support-bot-md/bot-routing.json");
 
@@ -43,8 +44,8 @@ function loadRoutingConfig() {
 
 const routingConfig = loadRoutingConfig();
 
-/** @type {Record<string, SkillEntry[]>} */
-export const SKILL_REGISTRY = Object.fromEntries(
+/** bot-routing.json 由来の静的レジストリ */
+const STATIC_REGISTRY = Object.fromEntries(
   Object.entries(routingConfig.routes).map(([category, route]) => [
     category,
     (route.skills || [])
@@ -60,6 +61,49 @@ export const SKILL_REGISTRY = Object.fromEntries(
   ])
 );
 
+// 動的スキルキャッシュ（コールドスタートごとに1回ロード）
+/** @type {Record<string, SkillEntry[]>} */
+let dynamicRegistry = {};
+
+/**
+ * NocoDB の skills テーブルから動的スキルを読み込む。
+ * Next.js サーバーレス環境では webhook route から呼び出すこと。
+ */
+export async function initDynamicSkills() {
+  try {
+    const skillDefs = await listActiveSkills();
+    const next = {};
+    for (const def of skillDefs) {
+      const categories = (() => {
+        try { return JSON.parse(def.intents || "[]"); } catch { return []; }
+      })();
+      const entry = {
+        name: def.skill_key,
+        run: (args) => runDynamicSkill(def, args),
+        confidenceThreshold: def.threshold ?? 0.65,
+        description: def.description || def.label || def.skill_key,
+      };
+      for (const cat of categories) {
+        if (!next[cat]) next[cat] = [];
+        if (!STATIC_REGISTRY[cat]?.some(e => e.name === def.skill_key)) {
+          next[cat].push(entry);
+        }
+      }
+    }
+    dynamicRegistry = next;
+    console.info(`[registry] dynamic skills loaded: ${skillDefs.length} skill(s)`);
+  } catch (err) {
+    console.warn(`[registry] dynamic skills load failed (skipping): ${err?.message}`);
+  }
+}
+
+/**
+ * カテゴリに対応する skill エントリーの配列を返す。
+ * 静的スキル + 動的スキルをマージして返す。
+ *
+ * @param {string} category
+ * @returns {SkillEntry[]}
+ */
 export function getSkillsForCategory(category) {
-  return SKILL_REGISTRY[category] ?? [];
+  return [...(STATIC_REGISTRY[category] ?? []), ...(dynamicRegistry[category] ?? [])];
 }

@@ -34,7 +34,8 @@ export const config = {
       knownIssues: process.env.NOCODB_KNOWN_ISSUES_TABLE_ID || "",
       cseCases: process.env.NOCODB_CSE_CASES_TABLE_ID || "",
       testTargets: process.env.NOCODB_TEST_TARGETS_TABLE_ID || "",
-      concierges: process.env.NOCODB_CONCIERGES_TABLE_ID || ""
+      concierges: process.env.NOCODB_CONCIERGES_TABLE_ID || "",
+      skills: process.env.NOCODB_SKILLS_TABLE_ID || ""
     }
   },
   llm: {

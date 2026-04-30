@@ -1,10 +1,18 @@
 import { type NextRequest } from "next/server";
 import { logRawPayload, logger } from "@/lib/bot/logger.js";
 import { processIntercomWebhook } from "@/lib/bot/processor.js";
+import { initDynamicSkills } from "@/lib/bot/skills/registry.js";
 
 export const runtime = "nodejs";
 
+// コールドスタートごとに1回だけ動的スキルをロード
+let skillsInitPromise: Promise<void> | null = null;
+
 export async function POST(request: NextRequest) {
+  if (!skillsInitPromise) {
+    skillsInitPromise = initDynamicSkills();
+  }
+  await skillsInitPromise;
   let payload: Record<string, unknown> = {};
   try {
     payload = await request.json();

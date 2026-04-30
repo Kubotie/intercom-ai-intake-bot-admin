@@ -81,3 +81,22 @@ export async function getMainConcierge() {
   });
   return unwrapList(data)[0] || null;
 }
+
+export async function listActiveSkills() {
+  if (!config.nocodb.tables.skills) return [];
+  const data = await listRecords(config.nocodb.tables.skills, {
+    where: "(status,eq,active)",
+    limit: 100
+  });
+  return unwrapList(data);
+}
+
+export async function listMessagesBySessionUid(sessionUid, limit = 10) {
+  if (!config.nocodb.tables.messages) return [];
+  const data = await listRecords(config.nocodb.tables.messages, {
+    where: whereEq("session_uid", sessionUid),
+    sort: "message_order",
+    limit
+  });
+  return unwrapList(data);
+}

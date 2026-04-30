@@ -88,9 +88,9 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
   const urlEditMode    = searchParams.get("edit") === "1";
 
   const buildLayout = useCallback(
-    () => buildInitialLayout(concierges, testTargets),
+    () => buildInitialLayout(concierges, testTargets, editorConfig.intentsConfig),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    []  // マウント時の intentsConfig（保存済み設定）でレイアウトを確定
   );
 
   // Restore saved node positions from localStorage
@@ -153,6 +153,17 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
   const [isDirty,  setIsDirty]  = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  // カテゴリ構造の安定ハッシュ（追加/削除/有効化/スキル変更でのみ変化）
+  const categoryStructureKey = useMemo(() => {
+    return Object.entries(editorConfig.intentsConfig.intents)
+      .filter(([, v]) => v?.enabled !== false)
+      .map(([k, v]) => `${k}:${(v.skills ?? []).map(s => s.name).sort().join("|")}`)
+      .sort()
+      .join(",");
+  }, [editorConfig.intentsConfig]);
+
+  const isFirstStructureRun = useRef(true);
+
   useEffect(() => {
     if (selectedWorkflow) {
       setEditorConfig(parseEditorConfig(selectedWorkflow));
@@ -168,6 +179,27 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
+
+  // カテゴリ構造（追加/削除/有効化/スキル変更）が変わったときにキャンバスを再構築
+  useEffect(() => {
+    if (isFirstStructureRun.current) { isFirstStructureRun.current = false; return; }
+    const { nodes: freshNodes, edges: freshEdges } = buildInitialLayout(
+      concierges, testTargets, editorConfig.intentsConfig
+    );
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const positions = JSON.parse(saved) as Record<string, { x: number; y: number }>;
+        setNodes(freshNodes.map(n => positions[n.id] ? { ...n, position: positions[n.id] } : n) as WorkflowNode[]);
+      } else {
+        setNodes(freshNodes as WorkflowNode[]);
+      }
+    } catch {
+      setNodes(freshNodes as WorkflowNode[]);
+    }
+    setEdges(freshEdges as WorkflowEdge[]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryStructureKey]);
 
   // ── Persist positions ─────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
-import { INTENT_META, SORTED_CATEGORIES } from "@/lib/workflow-types";
+import { INTENT_META, SORTED_CATEGORIES, SKILL_LABELS, SKILL_THRESHOLDS } from "@/lib/workflow-types";
 import type { IntentsConfigJson, IntentCategoryConfig } from "@/lib/workflow-editor-types";
 
 // ── Default intent config for template categories ─────────────────────────────
@@ -42,6 +42,23 @@ function CategoryEditor({ category, intentConfig, isTemplate, onChange, onDelete
   };
 
   const hasClassifyConfig = !!(intentConfig.classifyDescription || intentConfig.classifyExamples?.length || intentConfig.classifyBoundaryNotes);
+
+  // スキルトグル（テンプレートカテゴリでスキルが定義されている場合のみ表示）
+  const availableSkills = INTENT_META[category]?.skills ?? [];
+  const activeSkillNames = new Set(
+    (intentConfig.skills ?? []).length > 0
+      ? (intentConfig.skills ?? []).map(s => s.name)
+      : availableSkills
+  );
+  const toggleSkill = (skillName: string, checked: boolean) => {
+    const base = (intentConfig.skills ?? []).length > 0
+      ? intentConfig.skills
+      : availableSkills.map(name => ({ name, threshold: SKILL_THRESHOLDS[name] ?? 0.65 }));
+    const newSkills = checked
+      ? [...base.filter(s => s.name !== skillName), { name: skillName, threshold: SKILL_THRESHOLDS[skillName] ?? 0.65 }]
+      : base.filter(s => s.name !== skillName);
+    update({ skills: newSkills });
+  };
 
   return (
     <div className="border border-zinc-200 rounded-md overflow-hidden">
@@ -101,6 +118,27 @@ function CategoryEditor({ category, intentConfig, isTemplate, onChange, onDelete
               <p className="text-[10px] text-violet-500 mt-1">カスタムカテゴリは NL 指示で動作します。handoff タイミングも自然言語で記述してください。</p>
             )}
           </div>
+
+          {/* Skill toggles — template categories with skills only */}
+          {availableSkills.length > 0 && (
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-600 mb-1.5">使用するスキル</label>
+              <div className="space-y-1">
+                {availableSkills.map(skillName => (
+                  <label key={skillName} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={activeSkillNames.has(skillName)}
+                      onChange={e => toggleSkill(skillName, e.target.checked)}
+                      className="w-3 h-3 accent-blue-600"
+                    />
+                    <span className="text-[11px] text-zinc-700">{SKILL_LABELS[skillName] ?? skillName}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-[10px] text-zinc-400 mt-1">キャンバスと bot 処理フローに反映されます</p>
+            </div>
+          )}
 
           {/* Classify config (collapsible) */}
           <div>

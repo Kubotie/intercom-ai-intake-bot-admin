@@ -65,7 +65,7 @@ export function TerminalPanel({ data, onClose, policyConfig, onOpenPolicyEditor 
                 onClick={onOpenPolicyEditor}
                 className="w-full mt-1 px-3 py-1.5 text-[11px] bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors"
               >
-                ポリシー設定を開く →
+                振る舞い設定を開く →
               </button>
             )}
             {!onOpenPolicyEditor && (

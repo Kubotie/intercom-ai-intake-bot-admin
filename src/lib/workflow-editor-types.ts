@@ -21,6 +21,7 @@ export type HandoffConfigJson = {
 
 export type PolicyConfigJson = {
   version: 1;
+  nlPolicyInstruction?: string;
   escalation_keywords: string[];
   handoff_eagerness: "eager" | "normal" | "conservative";
 };
@@ -120,6 +121,7 @@ export const DEFAULT_HANDOFF_CONFIG: HandoffConfigJson = {
 
 export const DEFAULT_POLICY_CONFIG: PolicyConfigJson = {
   version: 1,
+  nlPolicyInstruction: "",
   escalation_keywords: [],
   handoff_eagerness: "normal",
 };

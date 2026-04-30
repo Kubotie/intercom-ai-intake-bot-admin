@@ -3,14 +3,12 @@ import { useState } from "react";
 import { AlertTriangle, Save } from "lucide-react";
 import type { WorkflowDefinition } from "@/lib/nocodb";
 import type { WorkflowEditorConfig } from "@/lib/workflow-editor-types";
-import { SkillOrderEditor }       from "@/components/workflow/editors/skill-order-editor";
-import { HandoffConfigEditor }    from "@/components/workflow/editors/handoff-config-editor";
-import { PolicyConfigEditor }     from "@/components/workflow/editors/policy-config-editor";
-import { SourceConfigEditor }     from "@/components/workflow/editors/source-config-editor";
-import { IntentConfigEditor }     from "@/components/workflow/editors/intent-config-editor";
-import { ConciergeToolsEditor }   from "@/components/workflow/editors/concierge-tools-editor";
+import { IntentConfigEditor }   from "@/components/workflow/editors/intent-config-editor";
+import { ConciergeToolsEditor } from "@/components/workflow/editors/concierge-tools-editor";
+import { SourceConfigEditor }   from "@/components/workflow/editors/source-config-editor";
+import { NlPolicyEditor }       from "@/components/workflow/editors/nl-policy-editor";
 
-type EditorTab = "intents" | "skill" | "handoff" | "policy" | "source" | "tools";
+type EditorTab = "intents" | "behavior" | "tools" | "source";
 
 interface Props {
   workflow:       WorkflowDefinition;
@@ -32,12 +30,10 @@ const STATUS_BADGE: Record<string, string> = {
 };
 
 const TABS: { key: EditorTab; label: string }[] = [
-  { key: "intents", label: "インテント" },
-  { key: "tools",   label: "ツール" },
-  { key: "skill",   label: "スキル順序" },
-  { key: "handoff", label: "Handoff" },
-  { key: "policy",  label: "ポリシー" },
-  { key: "source",  label: "ソース" },
+  { key: "intents",  label: "インテント" },
+  { key: "behavior", label: "振る舞い" },
+  { key: "tools",    label: "ツール" },
+  { key: "source",   label: "ソース" },
 ];
 
 export function WorkflowEditorPanel({ workflow, config, isDirty, isSaving, onChange, onSave, onClose, initialTab, conciergeKeys = [] }: Props) {
@@ -108,29 +104,17 @@ export function WorkflowEditorPanel({ workflow, config, isDirty, isSaving, onCha
               onChange={intentsConfig => onChange({ ...config, intentsConfig })}
             />
           )}
+          {tab === "behavior" && (
+            <NlPolicyEditor
+              config={config.policyConfig}
+              onChange={policyConfig => onChange({ ...config, policyConfig })}
+            />
+          )}
           {tab === "tools" && (
             <ConciergeToolsEditor
               config={config.intentsConfig}
               conciergeKeys={conciergeKeys}
               onChange={intentsConfig => onChange({ ...config, intentsConfig })}
-            />
-          )}
-          {tab === "skill" && (
-            <SkillOrderEditor
-              config={config.skillConfig}
-              onChange={skillConfig => onChange({ ...config, skillConfig })}
-            />
-          )}
-          {tab === "handoff" && (
-            <HandoffConfigEditor
-              config={config.handoffConfig}
-              onChange={handoffConfig => onChange({ ...config, handoffConfig })}
-            />
-          )}
-          {tab === "policy" && (
-            <PolicyConfigEditor
-              config={config.policyConfig}
-              onChange={policyConfig => onChange({ ...config, policyConfig })}
             />
           )}
           {tab === "source" && (

@@ -1,262 +1,132 @@
 "use client";
 import { useState } from "react";
-import { ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
-import {
-  REQUIRED_SLOTS_BY_CATEGORY,
-  HANDOFF_MIN_CONDITION_BY_CATEGORY,
-  SLOT_PRIORITY_BY_CATEGORY,
-} from "@/lib/bot/categories.js";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { INTENT_META, SORTED_CATEGORIES } from "@/lib/workflow-types";
-import type { IntentsConfigJson, IntentCategoryConfig, HandoffPreset } from "@/lib/workflow-editor-types";
-import { HANDOFF_PRESET_META } from "@/lib/workflow-editor-types";
-
-// slot 名 → 日本語ラベル
-const SLOT_LABELS: Record<string, string> = {
-  project_name_or_id:    "プロジェクト名またはID",
-  target_url:            "対象URL",
-  symptom:               "具体的な症状",
-  occurred_at:           "発生日時",
-  recent_change:         "最近の変更内容",
-  tag_type:              "タグの設置方法",
-  report_name:           "レポート名",
-  date_range:            "対象期間",
-  compare_target:        "比較対象",
-  expected_value:        "期待値",
-  actual_value:          "実際の値",
-  account_email_or_user: "メールアドレスまたはユーザー名",
-  occurred_screen:       "発生した画面",
-  error_message:         "エラーメッセージ",
-  contract_target:       "契約対象",
-  inquiry_topic:         "お問い合わせ内容",
-  target_period:         "対象期間",
-  cancellation_reason:   "解約理由",
-  reproduction_steps:    "再現手順",
-  experience_name:       "体験名またはポップアップ名",
-  target_feature:        "対象機能",
-  user_goal:             "やりたいこと",
-  feature_category:      "機能の種別",
-  device_type:           "デバイス種別",
-};
-
-const SKILL_LABELS: Record<string, string> = {
-  help_center_answer: "Help Center",
-  faq_answer:         "Notion FAQ",
-  known_bug_match:    "既知バグDB",
-};
-
-type SubTab = "slots" | "handoff" | "skills";
+import type { IntentsConfigJson, IntentCategoryConfig } from "@/lib/workflow-editor-types";
 
 interface CategoryEditorProps {
   category: string;
-  intentConfig: IntentCategoryConfig | null;
-  onChange: (category: string, config: IntentCategoryConfig | null) => void;
+  intentConfig: IntentCategoryConfig | undefined;
+  onChange: (category: string, config: IntentCategoryConfig) => void;
 }
 
 function CategoryEditor({ category, intentConfig, onChange }: CategoryEditorProps) {
-  const [subTab, setSubTab] = useState<SubTab>("slots");
+  const [classifyOpen, setClassifyOpen] = useState(false);
   const meta = INTENT_META[category];
 
-  const defaultSlots: string[] = REQUIRED_SLOTS_BY_CATEGORY[category as keyof typeof REQUIRED_SLOTS_BY_CATEGORY] ?? [];
-  const defaultPriority: string[] = SLOT_PRIORITY_BY_CATEGORY[category as keyof typeof SLOT_PRIORITY_BY_CATEGORY] ?? defaultSlots;
-  const defaultHandoff = HANDOFF_MIN_CONDITION_BY_CATEGORY[category as keyof typeof HANDOFF_MIN_CONDITION_BY_CATEGORY];
-  const defaultSkills: string[] = meta?.skills ?? [];
-
-  // Effective values (override or default)
-  const effectiveSlots    = intentConfig?.slots?.required ?? defaultSlots;
-  const effectivePriority = intentConfig?.slots?.priority ?? defaultPriority;
-  const effectivePreset   = intentConfig?.handoff?.preset ?? null;
-  const effectiveSkills   = intentConfig?.skills?.map(s => s.name) ?? defaultSkills;
-
-  const isModified = intentConfig !== null;
+  const enabled = intentConfig?.enabled ?? true;
+  const nlInstruction = intentConfig?.nlInstruction ?? "";
+  const classifyDescription = intentConfig?.classifyDescription ?? "";
+  const classifyExamples = intentConfig?.classifyExamples ?? [];
+  const classifyPriority = intentConfig?.classifyPriority ?? 5;
+  const classifyBoundaryNotes = intentConfig?.classifyBoundaryNotes ?? "";
+  const label = intentConfig?.label ?? "";
 
   const update = (partial: Partial<IntentCategoryConfig>) => {
     const base: IntentCategoryConfig = intentConfig ?? {
       enabled: true,
-      slots:   { required: defaultSlots, optional: [], priority: defaultPriority },
-      handoff: { preset: "balanced", required: defaultHandoff?.required ?? [], any_of: defaultHandoff?.any_of ?? [] },
-      skills:  defaultSkills.map(name => ({ name, threshold: 0.7 })),
+      slots: { required: [], optional: [], priority: [] },
+      handoff: { preset: "balanced", required: [], any_of: [] },
+      skills: [],
     };
     onChange(category, { ...base, ...partial });
   };
 
-  const reset = () => onChange(category, null);
-
-  // Slot priority reordering
-  const moveSlot = (idx: number, dir: -1 | 1) => {
-    const next = [...effectivePriority];
-    const newIdx = idx + dir;
-    if (newIdx < 0 || newIdx >= next.length) return;
-    [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
-    const base = intentConfig ?? {
-      enabled: true,
-      slots:   { required: effectiveSlots, optional: [], priority: effectivePriority },
-      handoff: { preset: "balanced", required: defaultHandoff?.required ?? [], any_of: defaultHandoff?.any_of ?? [] },
-      skills:  effectiveSkills.map(name => ({ name, threshold: 0.7 })),
-    };
-    onChange(category, {
-      ...base,
-      slots: { ...(intentConfig?.slots ?? { required: effectiveSlots, optional: [] }), priority: next }
-    });
-  };
-
-  // Skill reordering
-  const moveSkill = (idx: number, dir: -1 | 1) => {
-    const next = [...effectiveSkills];
-    const newIdx = idx + dir;
-    if (newIdx < 0 || newIdx >= next.length) return;
-    [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
-    const base = intentConfig ?? {
-      enabled: true,
-      slots:   { required: effectiveSlots, optional: [], priority: effectivePriority },
-      handoff: { preset: "balanced", required: defaultHandoff?.required ?? [], any_of: defaultHandoff?.any_of ?? [] },
-      skills:  defaultSkills.map(name => ({ name, threshold: 0.7 })),
-    };
-    onChange(category, {
-      ...base,
-      skills: next.map(name => {
-        const existing = (intentConfig?.skills ?? []).find(s => s.name === name);
-        return existing ?? { name, threshold: 0.7 };
-      })
-    });
-  };
-
-  const setHandoffPreset = (preset: HandoffPreset) => {
-    const base = intentConfig ?? {
-      enabled: true,
-      slots:   { required: effectiveSlots, optional: [], priority: effectivePriority },
-      handoff: { preset: "balanced", required: defaultHandoff?.required ?? [], any_of: defaultHandoff?.any_of ?? [] },
-      skills:  effectiveSkills.map(name => ({ name, threshold: 0.7 })),
-    };
-    onChange(category, { ...base, handoff: { ...(base.handoff), preset } });
-  };
+  const hasClassifyConfig = !!(intentConfig?.classifyDescription || intentConfig?.classifyExamples?.length || intentConfig?.classifyBoundaryNotes);
 
   return (
     <div className="border border-zinc-200 rounded-md overflow-hidden">
-      {/* Category header */}
+      {/* Header with enable toggle */}
       <div className="flex items-center gap-2 px-3 py-2 bg-zinc-50">
-        <span className="flex-1 text-xs font-medium text-zinc-700">{meta?.label ?? category}</span>
-        {isModified && (
-          <span className="text-[10px] bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded-full font-medium">変更済</span>
-        )}
-        {isModified && (
-          <button onClick={reset} className="text-zinc-400 hover:text-zinc-700" title="デフォルトに戻す">
-            <RotateCcw size={11} />
-          </button>
-        )}
+        <span className="flex-1 text-xs font-medium text-zinc-700 font-mono">{meta?.label ?? category}</span>
+        {label && <span className="text-[10px] text-zinc-400">{label}</span>}
+        <button
+          onClick={() => update({ enabled: !enabled })}
+          className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${enabled ? "bg-blue-500" : "bg-zinc-200"}`}
+        >
+          <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${enabled ? "translate-x-4" : "translate-x-0.5"}`} />
+        </button>
       </div>
 
-      {/* Sub-tabs */}
-      <div className="flex border-b border-zinc-100">
-        {(["slots", "handoff", "skills"] as SubTab[]).map(t => (
-          <button
-            key={t}
-            onClick={() => setSubTab(t)}
-            className={`flex-1 py-1 text-[11px] transition-colors ${
-              subTab === t ? "text-zinc-800 font-medium border-b-2 border-zinc-700" : "text-zinc-400 hover:text-zinc-600"
-            }`}
-          >
-            {t === "slots" ? "スロット" : t === "handoff" ? "Handoff" : "スキル"}
-          </button>
-        ))}
-      </div>
-
-      {/* Content */}
-      <div className="px-3 py-2.5">
-        {subTab === "slots" && (
+      {enabled && (
+        <div className="px-3 py-3 space-y-3">
+          {/* NL Instruction */}
           <div>
-            <p className="text-[10px] text-zinc-400 mb-2">収集優先順（上から順に質問）</p>
-            {effectivePriority.length === 0 ? (
-              <p className="text-[11px] text-zinc-400">このカテゴリはスロットなし</p>
-            ) : (
-              <div className="space-y-1">
-                {effectivePriority.map((slotName, idx) => (
-                  <div key={slotName} className="flex items-center gap-1">
-                    <span className="text-[10px] text-zinc-400 w-4 text-right">{idx + 1}.</span>
-                    <span className={`flex-1 text-[11px] px-2 py-0.5 rounded border ${
-                      effectiveSlots.includes(slotName)
-                        ? "bg-zinc-50 border-zinc-200 text-zinc-700"
-                        : "bg-zinc-50 border-zinc-100 text-zinc-400"
-                    }`}>
-                      {SLOT_LABELS[slotName] ?? slotName}
-                    </span>
-                    <div className="flex flex-col">
-                      <button onClick={() => moveSlot(idx, -1)} disabled={idx === 0}
-                        className="text-[10px] text-zinc-400 hover:text-zinc-700 disabled:opacity-25 leading-none">▲</button>
-                      <button onClick={() => moveSlot(idx, 1)} disabled={idx === effectivePriority.length - 1}
-                        className="text-[10px] text-zinc-400 hover:text-zinc-700 disabled:opacity-25 leading-none">▼</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <label className="block text-[11px] font-medium text-zinc-600 mb-1">振る舞い指示</label>
+            <textarea
+              value={nlInstruction}
+              onChange={e => update({ nlInstruction: e.target.value })}
+              placeholder={`例: ${meta?.label ?? category}の問い合わせは丁寧に対応し、解決策が見つからない場合は早めに担当者に引き継ぐ`}
+              rows={3}
+              className="w-full text-[11px] text-zinc-800 border border-zinc-200 rounded px-2.5 py-2 resize-y leading-relaxed placeholder:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-zinc-400 bg-white"
+            />
           </div>
-        )}
 
-        {subTab === "handoff" && (
+          {/* Classify config (collapsible) */}
           <div>
-            <p className="text-[10px] text-zinc-400 mb-2">このカテゴリのみの handoff 判定基準</p>
-            <div className="flex gap-1 mb-2">
-              {(["strict", "balanced", "lenient"] as HandoffPreset[]).map(p => (
-                <button
-                  key={p}
-                  onClick={() => setHandoffPreset(p)}
-                  className={`flex-1 py-1 text-[11px] rounded border transition-colors ${
-                    (effectivePreset ?? "balanced") === p
-                      ? "bg-zinc-700 text-white border-zinc-700 font-medium"
-                      : "text-zinc-500 border-zinc-200 hover:bg-zinc-50"
-                  }`}
-                >
-                  {HANDOFF_PRESET_META[p].label}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-zinc-400 leading-snug">
-              {HANDOFF_PRESET_META[effectivePreset ?? "balanced"].desc}
-            </p>
-            {defaultHandoff && (
-              <div className="mt-2 pt-2 border-t border-zinc-100">
-                <p className="text-[10px] text-zinc-400 mb-1">現在の条件（categories.js）</p>
-                {defaultHandoff.required.length > 0 && (
-                  <p className="text-[10px] text-zinc-500">必須: {defaultHandoff.required.map(s => SLOT_LABELS[s] ?? s).join(", ")}</p>
-                )}
-                {defaultHandoff.any_of.map((group, i) => (
-                  <p key={i} className="text-[10px] text-zinc-500">
-                    いずれか: {group.map(s => SLOT_LABELS[s] ?? s).join(" / ")}
-                  </p>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+            <button
+              onClick={() => setClassifyOpen(o => !o)}
+              className="flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-700 w-full text-left"
+            >
+              {classifyOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              <span className="font-medium">分類設定</span>
+              {hasClassifyConfig && (
+                <span className="ml-auto text-[10px] text-green-600 font-medium">✓ 設定済み</span>
+              )}
+            </button>
 
-        {subTab === "skills" && (
-          <div>
-            {effectiveSkills.length === 0 ? (
-              <p className="text-[11px] text-zinc-400">このカテゴリはスキルなし（担当者に直接引き継ぎ）</p>
-            ) : (
-              <>
-                <p className="text-[10px] text-zinc-400 mb-2">実行順序（上が先）</p>
-                <div className="space-y-1">
-                  {effectiveSkills.map((skillName, idx) => (
-                    <div key={skillName} className="flex items-center gap-1">
-                      <span className="text-[10px] text-zinc-400 w-4 text-right">{idx + 1}.</span>
-                      <span className="flex-1 text-[11px] bg-zinc-50 border border-zinc-200 text-zinc-700 px-2 py-0.5 rounded">
-                        {SKILL_LABELS[skillName] ?? skillName}
-                      </span>
-                      <div className="flex flex-col">
-                        <button onClick={() => moveSkill(idx, -1)} disabled={idx === 0}
-                          className="text-[10px] text-zinc-400 hover:text-zinc-700 disabled:opacity-25 leading-none">▲</button>
-                        <button onClick={() => moveSkill(idx, 1)} disabled={idx === effectiveSkills.length - 1}
-                          className="text-[10px] text-zinc-400 hover:text-zinc-700 disabled:opacity-25 leading-none">▼</button>
-                      </div>
-                    </div>
-                  ))}
+            {classifyOpen && (
+              <div className="mt-2 space-y-2.5 pl-3 border-l border-zinc-100">
+                <div>
+                  <label className="block text-[10px] font-medium text-zinc-500 mb-1">カテゴリ説明</label>
+                  <textarea
+                    value={classifyDescription}
+                    onChange={e => update({ classifyDescription: e.target.value })}
+                    placeholder="このカテゴリはどんな問い合わせか（LLMが分類に使用します）"
+                    rows={2}
+                    className="w-full text-[11px] text-zinc-800 border border-zinc-200 rounded px-2.5 py-1.5 resize-none leading-relaxed placeholder:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-zinc-400 bg-white"
+                  />
                 </div>
-              </>
+
+                <div>
+                  <label className="block text-[10px] font-medium text-zinc-500 mb-1">発話例（1行1例）</label>
+                  <textarea
+                    value={classifyExamples.join("\n")}
+                    onChange={e => update({ classifyExamples: e.target.value.split("\n").filter(Boolean) })}
+                    placeholder={`例:\n${meta?.label ?? category}について教えてほしい\nどうやって使えばいいですか`}
+                    rows={3}
+                    className="w-full text-[11px] text-zinc-800 border border-zinc-200 rounded px-2.5 py-1.5 resize-y leading-relaxed placeholder:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-zinc-400 bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-medium text-zinc-500 mb-1">分類優先度</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={classifyPriority}
+                    onChange={e => update({ classifyPriority: Number(e.target.value) })}
+                    className="w-16 text-[11px] text-zinc-800 border border-zinc-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                  />
+                  <span className="text-[10px] text-zinc-400 ml-2">1〜10（大きいほど優先）</span>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-medium text-zinc-500 mb-1">境界判定メモ</label>
+                  <textarea
+                    value={classifyBoundaryNotes}
+                    onChange={e => update({ classifyBoundaryNotes: e.target.value })}
+                    placeholder="他カテゴリとの区別・境界ケースの判定方針"
+                    rows={2}
+                    className="w-full text-[11px] text-zinc-800 border border-zinc-200 rounded px-2.5 py-1.5 resize-none leading-relaxed placeholder:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-zinc-400 bg-white"
+                  />
+                </div>
+              </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -269,31 +139,30 @@ interface Props {
 export function IntentConfigEditor({ config, onChange }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const handleCategoryChange = (category: string, catConfig: IntentCategoryConfig | null) => {
-    const next = { ...config.intents };
-    if (catConfig === null) {
-      delete next[category];
-    } else {
-      next[category] = catConfig;
-    }
-    onChange({ ...config, intents: next });
+  const handleCategoryChange = (category: string, catConfig: IntentCategoryConfig) => {
+    onChange({ ...config, intents: { ...config.intents, [category]: catConfig } });
   };
 
-  const modifiedCount = Object.keys(config.intents).length;
+  const configuredCount = Object.keys(config.intents).filter(k =>
+    config.intents[k]?.nlInstruction || config.intents[k]?.classifyDescription
+  ).length;
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between mb-1">
         <p className="text-[11px] text-zinc-500 leading-snug">
-          カテゴリごとのスロット優先順・handoff 条件・スキル順序を個別設定します。
+          カテゴリごとの振る舞い指示と分類設定を記述します。
         </p>
-        {modifiedCount > 0 && (
-          <span className="text-[10px] text-blue-600 font-medium shrink-0 ml-2">{modifiedCount}件変更</span>
+        {configuredCount > 0 && (
+          <span className="text-[10px] text-blue-600 font-medium shrink-0 ml-2">{configuredCount}件設定済み</span>
         )}
       </div>
 
       {SORTED_CATEGORIES.map(category => {
         const isOpen = expanded === category;
+        const intentConfig = config.intents[category];
+        const hasContent = !!(intentConfig?.nlInstruction || intentConfig?.classifyDescription);
+        const isDisabled = intentConfig?.enabled === false;
         return (
           <div key={category}>
             <button
@@ -301,15 +170,18 @@ export function IntentConfigEditor({ config, onChange }: Props) {
               className="w-full flex items-center gap-1.5 py-1.5 text-left"
             >
               {isOpen ? <ChevronDown size={12} className="text-zinc-500" /> : <ChevronRight size={12} className="text-zinc-400" />}
-              <span className="text-xs text-zinc-700">{INTENT_META[category]?.label ?? category}</span>
-              {config.intents[category] && (
-                <span className="ml-auto text-[10px] text-blue-600 font-medium">変更済</span>
+              <span className={`text-xs ${isDisabled ? "text-zinc-400 line-through" : "text-zinc-700"}`}>
+                {INTENT_META[category]?.label ?? category}
+              </span>
+              {isDisabled && <span className="ml-1 text-[10px] text-zinc-400">無効</span>}
+              {hasContent && !isDisabled && (
+                <span className="ml-auto text-[10px] text-blue-600 font-medium">✓ 設定済み</span>
               )}
             </button>
             {isOpen && (
               <CategoryEditor
                 category={category}
-                intentConfig={config.intents[category] ?? null}
+                intentConfig={intentConfig}
                 onChange={handleCategoryChange}
               />
             )}

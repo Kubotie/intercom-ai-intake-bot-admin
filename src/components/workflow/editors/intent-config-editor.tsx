@@ -43,23 +43,19 @@ function CategoryEditor({ category, intentConfig, isTemplate, onChange, onDelete
 
   const hasClassifyConfig = !!(intentConfig.classifyDescription || intentConfig.classifyExamples?.length || intentConfig.classifyBoundaryNotes);
 
-  // スキルトグル
-  // テンプレートカテゴリ: INTENT_META に定義されたスキルのみ選択可能
-  // カスタムカテゴリ: SKILL_LABELS の全スキルから選択可能
-  const availableSkills = isTemplate
-    ? (INTENT_META[category]?.skills ?? [])
-    : Object.keys(SKILL_LABELS);
+  // スキルトグル — 全カテゴリで全スキルを選択可能
+  const availableSkills = Object.keys(SKILL_LABELS);
+  // デフォルト: 設定済みスキルがあればそれを使用、なければ INTENT_META のデフォルトスキル
+  const metaDefaultSkills = INTENT_META[category]?.skills ?? [];
   const activeSkillNames = new Set(
     (intentConfig.skills ?? []).length > 0
       ? (intentConfig.skills ?? []).map(s => s.name)
-      : (isTemplate ? availableSkills : [])  // テンプレート: INTENT_META デフォルト / カスタム: 空
+      : metaDefaultSkills
   );
   const toggleSkill = (skillName: string, checked: boolean) => {
     const base = (intentConfig.skills ?? []).length > 0
       ? intentConfig.skills
-      : (isTemplate
-          ? availableSkills.map(name => ({ name, threshold: SKILL_THRESHOLDS[name] ?? 0.65 }))
-          : []);  // カスタムカテゴリは空から開始
+      : metaDefaultSkills.map(name => ({ name, threshold: SKILL_THRESHOLDS[name] ?? 0.65 }));
     const newSkills = checked
       ? [...base.filter(s => s.name !== skillName), { name: skillName, threshold: SKILL_THRESHOLDS[skillName] ?? 0.65 }]
       : base.filter(s => s.name !== skillName);

@@ -3,12 +3,13 @@ import { useState } from "react";
 import { AlertTriangle, Save } from "lucide-react";
 import type { WorkflowDefinition } from "@/lib/nocodb";
 import type { WorkflowEditorConfig } from "@/lib/workflow-editor-types";
-import { IntentConfigEditor }   from "@/components/workflow/editors/intent-config-editor";
-import { ConciergeToolsEditor } from "@/components/workflow/editors/concierge-tools-editor";
-import { SourceConfigEditor }   from "@/components/workflow/editors/source-config-editor";
-import { NlPolicyEditor }       from "@/components/workflow/editors/nl-policy-editor";
+import { IntentConfigEditor }      from "@/components/workflow/editors/intent-config-editor";
+import { ConciergeToolsEditor }    from "@/components/workflow/editors/concierge-tools-editor";
+import { SourceConfigEditor }      from "@/components/workflow/editors/source-config-editor";
+import { NlPolicyEditor }          from "@/components/workflow/editors/nl-policy-editor";
+import { SkillAssignmentEditor }   from "@/components/workflow/editors/skill-assignment-editor";
 
-type EditorTab = "intents" | "behavior" | "tools" | "source";
+type EditorTab = "intents" | "behavior" | "tools" | "source" | "skills";
 
 interface Props {
   workflow:       WorkflowDefinition;
@@ -31,6 +32,7 @@ const STATUS_BADGE: Record<string, string> = {
 
 const TABS: { key: EditorTab; label: string }[] = [
   { key: "intents",  label: "インテント" },
+  { key: "skills",   label: "スキル" },
   { key: "behavior", label: "振る舞い" },
   { key: "tools",    label: "ツール" },
   { key: "source",   label: "ソース" },
@@ -114,6 +116,12 @@ export function WorkflowEditorPanel({ workflow, config, isDirty, isSaving, onCha
             <ConciergeToolsEditor
               config={config.intentsConfig}
               conciergeKeys={conciergeKeys}
+              onChange={intentsConfig => onChange({ ...config, intentsConfig })}
+            />
+          )}
+          {tab === "skills" && (
+            <SkillAssignmentEditor
+              config={config.intentsConfig}
               onChange={intentsConfig => onChange({ ...config, intentsConfig })}
             />
           )}

@@ -4,6 +4,7 @@ import {
   SORTED_CATEGORIES,
   SKILL_LABELS,
   SKILL_THRESHOLDS,
+  type IntentMeta,
   type WorkflowNode,
   type WorkflowEdge,
 } from "@/lib/workflow-types";
@@ -12,6 +13,7 @@ import {
   SLOT_PRIORITY_BY_CATEGORY,
   HANDOFF_MIN_CONDITION_BY_CATEGORY,
 } from "@/lib/bot/categories.js";
+import type { IntentsConfigJson } from "@/lib/workflow-editor-types";
 
 // ── Column x-positions ────────────────────────────────────────────────────────
 
@@ -28,22 +30,27 @@ const COL = {
 const ROW_H   = 190;   // px between rows
 const START_Y =  60;   // first row y offset
 
-// ── Skill-enabled categories ──────────────────────────────────────────────────
-
-const SKILL_CATEGORIES = new Set(
-  Object.entries(INTENT_META)
-    .filter(([, m]) => m.skills.length > 0)
-    .map(([k]) => k)
-);
-
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function buildInitialLayout(
   concierges: Concierge[],
   testTargets: TestTarget[],
+  intentsConfig?: IntentsConfigJson,
 ): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } {
   const nodes: WorkflowNode[] = [];
   const edges: WorkflowEdge[] = [];
+
+  // ── Category list: dynamic from intentsConfig, fallback to SORTED_CATEGORIES ─
+
+  const categories: string[] = intentsConfig?.intents
+    ? Object.keys(intentsConfig.intents)
+        .filter(k => intentsConfig.intents[k]?.enabled !== false)
+        .sort((a, b) => {
+          const pa = intentsConfig.intents[a]?.classifyPriority ?? INTENT_META[a]?.priority ?? 99;
+          const pb = intentsConfig.intents[b]?.classifyPriority ?? INTENT_META[b]?.priority ?? 99;
+          return pa - pb;
+        })
+    : SORTED_CATEGORIES;
 
   // ── Entry node ────────────────────────────────────────────────────────────
 
@@ -131,8 +138,29 @@ export function buildInitialLayout(
 
   // ── Intent nodes + downstream ─────────────────────────────────────────────
 
-  SORTED_CATEGORIES.forEach((category, i) => {
-    const meta  = INTENT_META[category];
+  categories.forEach((category, i) => {
+    const baseMeta = INTENT_META[category];
+    const configEntry = intentsConfig?.intents[category];
+
+    // カスタムカテゴリ用の合成メタ（INTENT_META にない場合）
+    const meta: IntentMeta = baseMeta ?? {
+      label: configEntry?.label ?? category,
+      desc: "",
+      representativeUtterances: [],
+      priority: i + 1,
+      knowledgeFirst: false,
+      skills: [],
+      skillDescriptions: [],
+      color: "zinc",
+    };
+
+    // スキル決定:
+    // 1. configEntry.skills が設定されていれば使用（ユーザー設定優先）
+    // 2. なければ INTENT_META デフォルト（テンプレートカテゴリのフォールバック）
+    const configuredSkillNames = (configEntry?.skills ?? []).map(s => s.name);
+    const skillNames = configuredSkillNames.length > 0 ? configuredSkillNames : meta.skills;
+    const hasSkills = skillNames.length > 0;
+
     const y     = START_Y + ROW_H * i;
     const intentId = `intent-${category}`;
 
@@ -161,12 +189,23 @@ export function buildInitialLayout(
       style:  { stroke: "#94a3b8" },
     });
 
-    if (SKILL_CATEGORIES.has(category)) {
+    if (hasSkills) {
       // Skill nodes
       const skillIds: string[] = [];
-      meta.skills.forEach((skillName, si) => {
+      skillNames.forEach((skillName, si) => {
         const skillId = `skill-${category}-${skillName}`;
         skillIds.push(skillId);
+
+        // 設定済みスキルの threshold を優先、なければデフォルト
+        const configuredSkill = (configEntry?.skills ?? []).find(s => s.name === skillName);
+        const threshold = configuredSkill?.threshold ?? SKILL_THRESHOLDS[skillName] ?? 0.65;
+
+        // skillDesc: INTENT_META に対応するスキルのインデックスを検索
+        const metaSkillIdx = meta.skills.indexOf(skillName);
+        const skillDesc = metaSkillIdx >= 0
+          ? (meta.skillDescriptions[metaSkillIdx] ?? "")
+          : (SKILL_LABELS[skillName] ?? skillName);
+
         nodes.push({
           id:   skillId,
           type: "skill",
@@ -174,10 +213,10 @@ export function buildInitialLayout(
           data: {
             skillName,
             skillLabel:          SKILL_LABELS[skillName] ?? skillName,
-            skillDesc:           meta.skillDescriptions[si] ?? "",
+            skillDesc,
             category,
             orderIndex:          si,
-            confidenceThreshold: SKILL_THRESHOLDS[skillName] ?? 0.65,
+            confidenceThreshold: threshold,
           },
         });
 
@@ -281,11 +320,11 @@ export function buildInitialLayout(
     }
   });
 
-  // Escalation terminal (shared)
+  // Escalation terminal (shared) — position uses dynamic categories.length
   nodes.push({
     id:   "terminal-escalation",
     type: "terminal",
-    position: { x: COL.terminal, y: START_Y + ROW_H * SORTED_CATEGORIES.length },
+    position: { x: COL.terminal, y: START_Y + ROW_H * categories.length },
     data: { terminalType: "escalation", label: "エスカレーション" },
   });
   edges.push({

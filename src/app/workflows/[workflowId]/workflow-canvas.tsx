@@ -15,7 +15,6 @@ import {
   ReactFlowProvider,
   addEdge,
   type NodeTypes,
-  type EdgeTypes,
   type Connection,
 } from "@xyflow/react";
 import type { Concierge, TestTarget, WorkflowDefinition } from "@/lib/nocodb";
@@ -40,17 +39,10 @@ import { IntentNode }                 from "@/components/workflow/nodes/intent-n
 import { SkillNode }                  from "@/components/workflow/nodes/skill-node";
 import { HandoffCheckNode }           from "@/components/workflow/nodes/handoff-check-node";
 import { TerminalNode }               from "@/components/workflow/nodes/terminal-node";
-import { DecisionNode }               from "@/components/workflow/nodes/decision-node";
-import { IntentReunderstandingNode }  from "@/components/workflow/nodes/intent-reunderstanding-node";
-import { SectionHeaderNode }          from "@/components/workflow/nodes/section-header-node";
 import { PropertiesPanel }            from "@/components/workflow/panels/properties-panel";
 import { TestRunPanel }               from "@/components/workflow/panels/test-run-panel";
 import { WorkflowEditorPanel }        from "@/components/workflow/panels/workflow-editor-panel";
-import { DecisionPanel }              from "@/components/workflow/panels/decision-panel";
-import { IntentReunderstandingPanel } from "@/components/workflow/panels/intent-reunderstanding-panel";
 import { WorkflowToolbar }            from "@/components/workflow/workflow-toolbar";
-import { NodePalette }                from "@/components/workflow/node-palette";
-import { LoopbackEdge }              from "@/components/workflow/edges/loopback-edge";
 
 const STORAGE_KEY = "workflow_node_positions_v1";
 
@@ -62,13 +54,6 @@ const NODE_TYPES: NodeTypes = {
   skill:                   SkillNode                  as NodeTypes[string],
   handoffCheck:            HandoffCheckNode           as NodeTypes[string],
   terminal:                TerminalNode               as NodeTypes[string],
-  decision:                DecisionNode               as NodeTypes[string],
-  intentReunderstanding:   IntentReunderstandingNode  as NodeTypes[string],
-  sectionHeader:           SectionHeaderNode          as NodeTypes[string],
-};
-
-const EDGE_TYPES: EdgeTypes = {
-  loopback: LoopbackEdge as EdgeTypes[string],
 };
 
 interface Props {
@@ -129,8 +114,6 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
   const [filterKey,              setFilterKey]              = useState<string | null>(null);
   const [runResult,              setRunResult]              = useState<WorkflowRunResult | null>(null);
   const [testPanelOpen,          setTestPanelOpen]          = useState(false);
-  const [selectedDecisionId,     setSelectedDecisionId]     = useState<string | null>(null);
-  const [selectedReunderstId,    setSelectedReunderstId]    = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rfInstanceRef = useRef<any>(null);
 
@@ -353,92 +336,25 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
     window.location.reload();
   }, []);
 
-  // ── Node click — handle new node types ───────────────────────────────────────
+  // ── Node click ───────────────────────────────────────────────────────────────
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleNodeClickExtended = useCallback((_: React.MouseEvent, node: any) => {
     if (editMode) return;
     if (node.type === "sectionHeader") return;
     setTestPanelOpen(false);
-    if (node.type === "decision") {
-      setSelectedDecisionId(prev => prev === node.id ? null : node.id);
-      setSelectedReunderstId(null);
-      setSelectedNode(null);
-      return;
-    }
-    if (node.type === "intentReunderstanding") {
-      setSelectedReunderstId(prev => prev === node.id ? null : node.id);
-      setSelectedDecisionId(null);
-      setSelectedNode(null);
-      return;
-    }
-    setSelectedDecisionId(null);
-    setSelectedReunderstId(null);
     setSelectedNode(prev => prev?.id === node.id ? null : node as WorkflowNode);
   }, [editMode]);
 
-  // ── Drag-and-drop new nodes from palette ─────────────────────────────────────
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const nodeType = e.dataTransfer.getData("application/reactflow-nodetype");
-    if (!nodeType || !rfInstanceRef.current) return;
-
-    const position = rfInstanceRef.current.screenToFlowPosition({
-      x: e.clientX,
-      y: e.clientY,
-    });
-
-    const id = `${nodeType}-${Date.now()}`;
-    const defaultData: Record<string, unknown> = {
-      decision:              { description: "", outputs: ["reply", "escalate", "investigate"] },
-      intentReunderstanding: { label: "フォローアップ発話を再分類", maxTurns: 3 },
-    };
-
-    const newNode: WorkflowNode = {
-      id,
-      type: nodeType,
-      position,
-      data: defaultData[nodeType] ?? {},
-    } as WorkflowNode;
-
-    setNodes(nds => [...nds, newNode]);
-  }, [setNodes]);
-
-  // ── Connect edges — auto-style loopback from IntentReunderstandingNode ────────
+  // ── Connect edges ─────────────────────────────────────────────────────────────
 
   const handleConnect = useCallback((connection: Connection) => {
-    const sourceNode = nodes.find(n => n.id === connection.source);
-    const isLoopback = sourceNode?.type === "intentReunderstanding";
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setEdges((eds: any[]) => addEdge(
-      {
-        ...connection,
-        id: `e-${connection.source}-${connection.target}-${Date.now()}`,
-        ...(isLoopback ? { type: "loopback", label: "再分類" } : {}),
-      },
+      { ...connection, id: `e-${connection.source}-${connection.target}-${Date.now()}` },
       eds
     ));
-  }, [nodes, setEdges]);
-
-  // ── Update decision node data ─────────────────────────────────────────────────
-
-  const handleDecisionSave = useCallback((nodeId: string, data: { description: string; outputs: Array<"reply" | "escalate" | "investigate"> }) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setNodes((nds: any[]) => nds.map((n: any) => n.id === nodeId ? { ...n, data } : n));
-    setSelectedDecisionId(null);
-  }, [setNodes]);
-
-  const handleReunderstandingSave = useCallback((nodeId: string, data: { label: string; maxTurns: number }) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setNodes((nds: any[]) => nds.map((n: any) => n.id === nodeId ? { ...n, data } : n));
-    setSelectedReunderstId(null);
-  }, [setNodes]);
+  }, [setEdges]);
 
   const handleIntentDescSave = useCallback((nodeId: string, naturalLanguageDesc: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -572,13 +488,6 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
-  const selectedDecisionNode = selectedDecisionId
-    ? (nodes.find(n => n.id === selectedDecisionId) as import("@/lib/workflow-types").DecisionFlowNode | undefined) ?? null
-    : null;
-
-  const selectedReunderstandingNode = selectedReunderstId
-    ? (nodes.find(n => n.id === selectedReunderstId) as import("@/lib/workflow-types").IntentReunderstandingFlowNode | undefined) ?? null
-    : null;
 
   return (
     <div className="relative w-full h-full">
@@ -591,17 +500,10 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onNodeClick={handleNodeClickExtended as any}
         onPaneClick={() => {
-          if (!editMode) {
-            setSelectedNode(null);
-            setSelectedDecisionId(null);
-            setSelectedReunderstId(null);
-          }
+          if (!editMode) setSelectedNode(null);
         }}
         onInit={(instance) => { rfInstanceRef.current = instance; }}
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
         nodeTypes={NODE_TYPES}
-        edgeTypes={EDGE_TYPES}
         minZoom={0.2}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
@@ -643,10 +545,6 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
         </Panel>
       </ReactFlow>
 
-      {/* Node palette — shown when not in test or edit panel */}
-      {!testPanelOpen && !editMode && (
-        <NodePalette />
-      )}
 
       <WorkflowToolbar
         concierges={concierges}
@@ -668,7 +566,7 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
       />
 
       {/* Panels — mutually exclusive */}
-      {!testPanelOpen && !editMode && !selectedDecisionNode && !selectedReunderstandingNode && (
+      {!testPanelOpen && !editMode && (
         <PropertiesPanel
           node={selectedNode}
           conciergeKeys={conciergeKeys}
@@ -685,22 +583,6 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
             setEditorInitialTab("behavior");
             setEditMode(true);
           } : undefined}
-        />
-      )}
-
-      {!testPanelOpen && !editMode && selectedDecisionNode && (
-        <DecisionPanel
-          data={selectedDecisionNode.data}
-          onSave={(data) => handleDecisionSave(selectedDecisionNode.id, data)}
-          onClose={() => setSelectedDecisionId(null)}
-        />
-      )}
-
-      {!testPanelOpen && !editMode && selectedReunderstandingNode && (
-        <IntentReunderstandingPanel
-          data={selectedReunderstandingNode.data}
-          onSave={(data) => handleReunderstandingSave(selectedReunderstandingNode.id, data)}
-          onClose={() => setSelectedReunderstId(null)}
         />
       )}
 

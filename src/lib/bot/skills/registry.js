@@ -16,6 +16,7 @@ import { runFaqAnswerSkill } from "./faq-answer.js";
 import { runKnownBugMatchSkill } from "./known-bug-match.js";
 import { runDynamicSkill } from "./dynamic-skill-runner.js";
 import { listActiveSkills } from "../nocodb-repo.js";
+import { getActiveWorkflow, parseWorkflowOverrides } from "../workflow-resolver.js";
 
 const ROUTING_CONFIG_PATH = path.join(process.cwd(), "ai-support-bot-md/bot-routing.json");
 
@@ -68,28 +69,64 @@ let dynamicRegistry = {};
 /**
  * NocoDB の skills テーブルから動的スキルを読み込む。
  * Next.js サーバーレス環境では webhook route から呼び出すこと。
+ *
+ * カテゴリ紐づけの優先順位:
+ *   1. ワークフローの intentsConfig.intents[category].skills（ワークフローエディターで設定）
+ *   2. スキルレコード自身の intents フィールド（後方互換）
  */
 export async function initDynamicSkills() {
   try {
     const skillDefs = await listActiveSkills();
-    const next = {};
+
+    // skill_key → SkillEntry のルックアップマップ
+    const entryMap = {};
     for (const def of skillDefs) {
-      const categories = (() => {
-        try { return JSON.parse(def.intents || "[]"); } catch { return []; }
-      })();
-      const entry = {
+      entryMap[def.skill_key] = {
         name: def.skill_key,
         run: (args) => runDynamicSkill(def, args),
         confidenceThreshold: def.threshold ?? 0.65,
         description: def.description || def.label || def.skill_key,
       };
+    }
+
+    const next = {};
+
+    // 1. スキルの intents フィールドでルーティング（後方互換）
+    for (const def of skillDefs) {
+      const categories = (() => {
+        try { return JSON.parse(def.intents || "[]"); } catch { return []; }
+      })();
       for (const cat of categories) {
         if (!next[cat]) next[cat] = [];
-        if (!STATIC_REGISTRY[cat]?.some(e => e.name === def.skill_key)) {
-          next[cat].push(entry);
+        if (!STATIC_REGISTRY[cat]?.some(e => e.name === def.skill_key) && !next[cat].some(e => e.name === def.skill_key)) {
+          next[cat].push(entryMap[def.skill_key]);
         }
       }
     }
+
+    // 2. ワークフローの intentsConfig でルーティング（ワークフローエディター設定を反映）
+    try {
+      const workflow = await getActiveWorkflow();
+      const { intentsConfig } = parseWorkflowOverrides(workflow);
+      for (const [cat, intentCfg] of Object.entries(intentsConfig?.intents ?? {})) {
+        if (intentCfg?.enabled === false) continue;
+        const configuredSkills = intentCfg?.skills ?? [];
+        if (configuredSkills.length === 0) continue;
+        for (const { name: skillName, threshold } of configuredSkills) {
+          const baseEntry = entryMap[skillName];
+          if (!baseEntry) continue;  // 静的スキルや未登録スキルはスキップ
+          const entry = threshold !== undefined ? { ...baseEntry, confidenceThreshold: threshold } : baseEntry;
+          if (!next[cat]) next[cat] = [];
+          if (!STATIC_REGISTRY[cat]?.some(e => e.name === skillName) && !next[cat].some(e => e.name === skillName)) {
+            next[cat].push(entry);
+          }
+        }
+      }
+      console.info("[registry] workflow intentsConfig applied to dynamic skill routing");
+    } catch (err) {
+      console.warn(`[registry] workflow intentsConfig load failed (skipping): ${err?.message}`);
+    }
+
     dynamicRegistry = next;
     console.info(`[registry] dynamic skills loaded: ${skillDefs.length} skill(s)`);
   } catch (err) {

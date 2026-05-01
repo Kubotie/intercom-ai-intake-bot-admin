@@ -1,5 +1,6 @@
 "use client";
-import { SKILL_LABELS, SKILL_THRESHOLDS, INTENT_META } from "@/lib/workflow-types";
+import { INTENT_META } from "@/lib/workflow-types";
+import { useSkills } from "@/hooks/use-skills";
 import type { IntentsConfigJson, IntentCategoryConfig } from "@/lib/workflow-editor-types";
 
 const SKILL_DESCRIPTIONS: Record<string, string> = {
@@ -14,7 +15,8 @@ interface Props {
 }
 
 export function SkillAssignmentEditor({ config, onChange }: Props) {
-  const allSkills  = Object.keys(SKILL_LABELS);
+  const { skills, skillLabels, skillThresholds } = useSkills();
+  const allSkills = skills.map(s => s.key);
   const categories = Object.entries(config.intents)
     .filter(([, v]) => v?.enabled !== false)
     .sort(([, a], [, b]) => (b.classifyPriority ?? 5) - (a.classifyPriority ?? 5));
@@ -30,17 +32,17 @@ export function SkillAssignmentEditor({ config, onChange }: Props) {
   function getThreshold(category: string, skillName: string, intentConfig: IntentCategoryConfig): number {
     const found = intentConfig.skills?.find(s => s.name === skillName);
     if (found) return found.threshold;
-    return SKILL_THRESHOLDS[skillName] ?? 0.65;
+    return skillThresholds[skillName] ?? 0.65;
   }
 
   function toggleSkill(category: string, intentConfig: IntentCategoryConfig, skillName: string, checked: boolean) {
     const metaDefaults = INTENT_META[category]?.skills ?? [];
     const base = (intentConfig.skills ?? []).length > 0
       ? intentConfig.skills
-      : metaDefaults.map(name => ({ name, threshold: SKILL_THRESHOLDS[name] ?? 0.65 }));
+      : metaDefaults.map(name => ({ name, threshold: skillThresholds[name] ?? 0.65 }));
 
     const newSkills = checked
-      ? [...base.filter(s => s.name !== skillName), { name: skillName, threshold: SKILL_THRESHOLDS[skillName] ?? 0.65 }]
+      ? [...base.filter(s => s.name !== skillName), { name: skillName, threshold: skillThresholds[skillName] ?? 0.65 }]
       : base.filter(s => s.name !== skillName);
 
     onChange({
@@ -56,7 +58,7 @@ export function SkillAssignmentEditor({ config, onChange }: Props) {
     const metaDefaults = INTENT_META[category]?.skills ?? [];
     const base = (intentConfig.skills ?? []).length > 0
       ? intentConfig.skills
-      : metaDefaults.map(name => ({ name, threshold: SKILL_THRESHOLDS[name] ?? 0.65 }));
+      : metaDefaults.map(name => ({ name, threshold: skillThresholds[name] ?? 0.65 }));
 
     const newSkills = base.some(s => s.name === skillName)
       ? base.map(s => s.name === skillName ? { ...s, threshold: value } : s)
@@ -88,10 +90,10 @@ export function SkillAssignmentEditor({ config, onChange }: Props) {
             <div className="px-3 py-2.5 bg-zinc-50 border-b border-zinc-100">
               <div className="flex items-center justify-between mb-0.5">
                 <span className="text-[12px] font-semibold text-zinc-700">
-                  {SKILL_LABELS[skillName]}
+                  {skillLabels[skillName] ?? skillName}
                 </span>
                 <span className="text-[10px] text-zinc-400 font-mono">
-                  デフォルト閾値 {Math.round((SKILL_THRESHOLDS[skillName] ?? 0.65) * 100)}%
+                  デフォルト閾値 {Math.round((skillThresholds[skillName] ?? 0.65) * 100)}%
                 </span>
               </div>
               <p className="text-[10px] text-zinc-400 leading-snug">

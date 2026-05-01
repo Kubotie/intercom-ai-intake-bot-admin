@@ -1,7 +1,8 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
-import { INTENT_META, SORTED_CATEGORIES, SKILL_LABELS, SKILL_THRESHOLDS } from "@/lib/workflow-types";
+import { INTENT_META, SORTED_CATEGORIES } from "@/lib/workflow-types";
+import { useSkills } from "@/hooks/use-skills";
 import type { IntentsConfigJson, IntentCategoryConfig } from "@/lib/workflow-editor-types";
 
 // ── Default intent config for template categories ─────────────────────────────
@@ -24,9 +25,12 @@ interface CategoryEditorProps {
   isTemplate: boolean;
   onChange: (category: string, config: IntentCategoryConfig) => void;
   onDelete: (category: string) => void;
+  skillLabels: Record<string, string>;
+  skillThresholds: Record<string, number>;
+  allSkillKeys: string[];
 }
 
-function CategoryEditor({ category, intentConfig, isTemplate, onChange, onDelete }: CategoryEditorProps) {
+function CategoryEditor({ category, intentConfig, isTemplate, onChange, onDelete, skillLabels, skillThresholds, allSkillKeys }: CategoryEditorProps) {
   const [classifyOpen, setClassifyOpen] = useState(false);
 
   const label = intentConfig.label ?? (INTENT_META[category]?.label ?? category);
@@ -44,7 +48,7 @@ function CategoryEditor({ category, intentConfig, isTemplate, onChange, onDelete
   const hasClassifyConfig = !!(intentConfig.classifyDescription || intentConfig.classifyExamples?.length || intentConfig.classifyBoundaryNotes);
 
   // スキルトグル — 全カテゴリで全スキルを選択可能
-  const availableSkills = Object.keys(SKILL_LABELS);
+  const availableSkills = allSkillKeys;
   // デフォルト: 設定済みスキルがあればそれを使用、なければ INTENT_META のデフォルトスキル
   const metaDefaultSkills = INTENT_META[category]?.skills ?? [];
   const activeSkillNames = new Set(
@@ -55,9 +59,9 @@ function CategoryEditor({ category, intentConfig, isTemplate, onChange, onDelete
   const toggleSkill = (skillName: string, checked: boolean) => {
     const base = (intentConfig.skills ?? []).length > 0
       ? intentConfig.skills
-      : metaDefaultSkills.map(name => ({ name, threshold: SKILL_THRESHOLDS[name] ?? 0.65 }));
+      : metaDefaultSkills.map(name => ({ name, threshold: skillThresholds[name] ?? 0.65 }));
     const newSkills = checked
-      ? [...base.filter(s => s.name !== skillName), { name: skillName, threshold: SKILL_THRESHOLDS[skillName] ?? 0.65 }]
+      ? [...base.filter(s => s.name !== skillName), { name: skillName, threshold: skillThresholds[skillName] ?? 0.65 }]
       : base.filter(s => s.name !== skillName);
     update({ skills: newSkills });
   };
@@ -134,7 +138,7 @@ function CategoryEditor({ category, intentConfig, isTemplate, onChange, onDelete
                       onChange={e => toggleSkill(skillName, e.target.checked)}
                       className="w-3 h-3 accent-blue-600"
                     />
-                    <span className="text-[11px] text-zinc-700">{SKILL_LABELS[skillName] ?? skillName}</span>
+                    <span className="text-[11px] text-zinc-700">{skillLabels[skillName] ?? skillName}</span>
                   </label>
                 ))}
               </div>
@@ -289,6 +293,8 @@ export function IntentConfigEditor({ config, onChange }: Props) {
   const [templateDropdownOpen, setTemplateDropdownOpen] = useState(false);
   const [showCustomForm, setShowCustomForm] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const { skills, skillLabels, skillThresholds } = useSkills();
+  const allSkillKeys = skills.map(s => s.key);
 
   // 初回: config.intents が空ならデフォルト7カテゴリを自動追加
   useEffect(() => {
@@ -436,6 +442,9 @@ export function IntentConfigEditor({ config, onChange }: Props) {
                   isTemplate={isTemplate}
                   onChange={handleCategoryChange}
                   onDelete={handleDelete}
+                  skillLabels={skillLabels}
+                  skillThresholds={skillThresholds}
+                  allSkillKeys={allSkillKeys}
                 />
               )}
             </div>

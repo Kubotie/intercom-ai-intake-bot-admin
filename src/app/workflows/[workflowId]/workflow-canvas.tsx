@@ -622,6 +622,7 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
         <TestRunPanel
           concierges={concierges}
           workflowKey={selectedWorkflowKey}
+          intentsConfig={editorConfig.intentsConfig}
           onResult={handleTestResult}
           onClose={() => setTestPanelOpen(false)}
         />

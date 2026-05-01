@@ -4,15 +4,19 @@ import type { Concierge } from "@/lib/nocodb";
 import type { WorkflowRunResult } from "@/lib/workflow-run-result";
 import { parseSandboxResult } from "@/lib/workflow-run-result";
 import { INTENT_META, SKILL_LABELS, SORTED_CATEGORIES } from "@/lib/workflow-types";
+import type { IntentsConfigJson } from "@/lib/workflow-editor-types";
 
 interface Props {
-  concierges:  Concierge[];
-  workflowKey: string | null;
-  onResult:    (result: WorkflowRunResult | null) => void;
-  onClose:     () => void;
+  concierges:    Concierge[];
+  workflowKey:   string | null;
+  intentsConfig?: IntentsConfigJson;
+  onResult:      (result: WorkflowRunResult | null) => void;
+  onClose:       () => void;
 }
 
-export function TestRunPanel({ concierges, workflowKey, onResult, onClose }: Props) {
+const TEMPLATE_KEYS = new Set(SORTED_CATEGORIES);
+
+export function TestRunPanel({ concierges, workflowKey, intentsConfig, onResult, onClose }: Props) {
   const [message,       setMessage]       = useState("");
   const [conciergeKey,  setConciergeKey]  = useState("");
   const [forceCategory, setForceCategory] = useState("");
@@ -123,11 +127,22 @@ export function TestRunPanel({ concierges, workflowKey, onResult, onClose }: Pro
             className="w-full text-xs border border-zinc-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
           >
             <option value="">自動分類</option>
-            {SORTED_CATEGORIES.map((cat) => (
-              <option key={cat} value={cat}>
-                {INTENT_META[cat].label} ({cat})
-              </option>
-            ))}
+            {/* テンプレートカテゴリ: intentsConfig で enabled:false にされていなければ表示 */}
+            {SORTED_CATEGORIES
+              .filter(cat => intentsConfig?.intents?.[cat]?.enabled !== false)
+              .map((cat) => (
+                <option key={cat} value={cat}>
+                  {intentsConfig?.intents?.[cat]?.label ?? INTENT_META[cat].label} ({cat})
+                </option>
+              ))}
+            {/* カスタムカテゴリ: intentsConfig に存在し enabled:false でないもの */}
+            {intentsConfig && Object.entries(intentsConfig.intents)
+              .filter(([k, v]) => !TEMPLATE_KEYS.has(k) && v?.enabled !== false)
+              .map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v.label ?? k} ({k})
+                </option>
+              ))}
           </select>
         </div>
 
@@ -154,7 +169,7 @@ export function TestRunPanel({ concierges, workflowKey, onResult, onClose }: Pro
 
       {/* Result summary */}
       <div className="flex-1 overflow-y-auto">
-        {result && <TestResultSummary result={result} />}
+        {result && <TestResultSummary result={result} intentsConfig={intentsConfig} />}
         {!result && !running && (
           <p className="text-xs text-zinc-400 p-4 text-center">
             発話を入力して実行すると<br />workflow 上にハイライトされます
@@ -165,7 +180,7 @@ export function TestRunPanel({ concierges, workflowKey, onResult, onClose }: Pro
   );
 }
 
-function TestResultSummary({ result }: { result: WorkflowRunResult }) {
+function TestResultSummary({ result, intentsConfig }: { result: WorkflowRunResult; intentsConfig?: IntentsConfigJson }) {
   return (
     <div className="p-4 space-y-3">
       <SectionHeader label="実行結果" />
@@ -174,7 +189,9 @@ function TestResultSummary({ result }: { result: WorkflowRunResult }) {
 
       <Row label="カテゴリ">
         {result.category
-          ? <span className="text-[11px] font-semibold text-purple-700">{INTENT_META[result.category]?.label ?? result.category}</span>
+          ? <span className="text-[11px] font-semibold text-purple-700">
+              {intentsConfig?.intents?.[result.category]?.label ?? INTENT_META[result.category]?.label ?? result.category}
+            </span>
           : <span className="text-[11px] text-zinc-400">—</span>}
       </Row>
 

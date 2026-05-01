@@ -17,6 +17,7 @@ import { runKnownBugMatchSkill } from "./known-bug-match.js";
 import { runDynamicSkill } from "./dynamic-skill-runner.js";
 import { listActiveSkills } from "../nocodb-repo.js";
 import { getActiveWorkflow, parseWorkflowOverrides } from "../workflow-resolver.js";
+import { config } from "../config.js";
 
 const ROUTING_CONFIG_PATH = path.join(process.cwd(), "ai-support-bot-md/bot-routing.json");
 
@@ -66,6 +67,14 @@ const STATIC_REGISTRY = Object.fromEntries(
 /** @type {Record<string, SkillEntry[]>} */
 let dynamicRegistry = {};
 
+/** 最後の initDynamicSkills() 結果（デバッグ用） */
+let _lastInitResult = {
+  skillsTableConfigured: false,
+  loadedSkillKeys: [],
+  registeredByCategory: {},
+  error: null,
+};
+
 /**
  * NocoDB の skills テーブルから動的スキルを読み込む。
  * Next.js サーバーレス環境では webhook route から呼び出すこと。
@@ -75,6 +84,7 @@ let dynamicRegistry = {};
  *   2. スキルレコード自身の intents フィールド（後方互換）
  */
 export async function initDynamicSkills() {
+  const skillsTableConfigured = !!config.nocodb.tables.skills;
   try {
     const skillDefs = await listActiveSkills();
 
@@ -128,10 +138,29 @@ export async function initDynamicSkills() {
     }
 
     dynamicRegistry = next;
+    _lastInitResult = {
+      skillsTableConfigured,
+      loadedSkillKeys: skillDefs.map(d => d.skill_key),
+      registeredByCategory: Object.fromEntries(
+        Object.entries(next).map(([cat, entries]) => [cat, entries.map(e => e.name)])
+      ),
+      error: null,
+    };
     console.info(`[registry] dynamic skills loaded: ${skillDefs.length} skill(s)`);
   } catch (err) {
+    _lastInitResult = {
+      skillsTableConfigured,
+      loadedSkillKeys: [],
+      registeredByCategory: {},
+      error: err?.message ?? "unknown error",
+    };
     console.warn(`[registry] dynamic skills load failed (skipping): ${err?.message}`);
   }
+}
+
+/** 最後の initDynamicSkills() 結果を返す（デバッグ用）。 */
+export function getLastInitResult() {
+  return { ..._lastInitResult };
 }
 
 /**

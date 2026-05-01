@@ -7,6 +7,13 @@ export type SkillAttempt = {
   rejectionReason: string | null;
 };
 
+export type RegistryDebug = {
+  skillsTableConfigured: boolean;
+  loadedSkillKeys: string[];
+  registeredForCategory: string[];
+  initError: string | null;
+};
+
 export type WorkflowRunResult = {
   message: string;
   conciergeKey: string | null;
@@ -26,6 +33,7 @@ export type WorkflowRunResult = {
   } | null;
   replyCandidate: string | null;
   classifyReason: string | null;
+  registryDebug: RegistryDebug | null;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -61,5 +69,13 @@ export function parseSandboxResult(raw: any, message: string): WorkflowRunResult
       : null,
     replyCandidate: raw.reply_candidate ?? null,
     classifyReason: raw.classify_reason ?? null,
+    registryDebug: raw.registry_debug
+      ? {
+          skillsTableConfigured: Boolean(raw.registry_debug.skills_table_configured),
+          loadedSkillKeys:       raw.registry_debug.loaded_skill_keys ?? [],
+          registeredForCategory: raw.registry_debug.registered_for_category ?? [],
+          initError:             raw.registry_debug.init_error ?? null,
+        }
+      : null,
   };
 }

@@ -1,7 +1,7 @@
 "use client";
 import React, { useState } from "react";
 import type { Concierge } from "@/lib/nocodb";
-import type { WorkflowRunResult } from "@/lib/workflow-run-result";
+import type { WorkflowRunResult, RegistryDebug } from "@/lib/workflow-run-result";
 import { parseSandboxResult } from "@/lib/workflow-run-result";
 import { INTENT_META, SKILL_LABELS, SORTED_CATEGORIES } from "@/lib/workflow-types";
 import type { IntentsConfigJson } from "@/lib/workflow-editor-types";
@@ -263,6 +263,8 @@ function TestResultSummary({ result, intentsConfig }: { result: WorkflowRunResul
           </p>
         </div>
       )}
+
+      {result.registryDebug && <RegistryDebugSection debug={result.registryDebug} />}
     </div>
   );
 }
@@ -307,6 +309,26 @@ function Badge({ color, children }: { color: string; children: React.ReactNode }
     <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${cls[color] ?? cls.green}`}>
       {children}
     </span>
+  );
+}
+
+function RegistryDebugSection({ debug }: { debug: RegistryDebug }) {
+  const hasIssue = !debug.skillsTableConfigured || debug.loadedSkillKeys.length === 0 || debug.initError;
+  return (
+    <div>
+      <p className="text-[10px] font-semibold text-zinc-500 mb-1">スキルレジストリ診断</p>
+      <div className={`text-[10px] font-mono space-y-0.5 p-2 rounded border ${hasIssue ? "bg-red-50 border-red-200 text-red-700" : "bg-zinc-50 border-zinc-100 text-zinc-600"}`}>
+        <p>
+          skills_table:{" "}
+          <span className={debug.skillsTableConfigured ? "text-green-700" : "text-red-600 font-bold"}>
+            {debug.skillsTableConfigured ? "設定済み" : "未設定 ← NOCODB_SKILLS_TABLE_IDが必要"}
+          </span>
+        </p>
+        <p>loaded: <span className="text-zinc-700">{debug.loadedSkillKeys.length === 0 ? "なし" : debug.loadedSkillKeys.join(", ")}</span></p>
+        <p>category登録: <span className="text-zinc-700">{debug.registeredForCategory.length === 0 ? "なし" : debug.registeredForCategory.join(", ")}</span></p>
+        {debug.initError && <p className="text-red-600">error: {debug.initError}</p>}
+      </div>
+    </div>
   );
 }
 

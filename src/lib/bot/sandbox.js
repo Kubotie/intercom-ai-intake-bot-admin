@@ -22,7 +22,7 @@ import {
 } from "./categories.js";
 import { isReadyForHandoff } from "./handoff-guard.js";
 import { runSkillOrchestration } from "./skills/orchestrator.js";
-import { initDynamicSkills, getSkillsForCategory } from "./skills/registry.js";
+import { initDynamicSkills, getSkillsForCategory, getLastInitResult } from "./skills/registry.js";
 import { resolveReplyMessage } from "./reply-resolver.js";
 import { getConciergeByKey, getMainConcierge } from "./nocodb-repo.js";
 import { getActiveWorkflow, parseWorkflowOverrides } from "./workflow-resolver.js";
@@ -107,7 +107,9 @@ export async function runSandboxSimulation({
   logger.info("sandbox simulation started", { ...ctx, latestUserMessage, forceCategory, conciergeKey });
 
   // ── 初期化: 動的スキルとワークフロー設定を読み込む ──────────────────────
-  await initDynamicSkills().catch(() => {});
+  await initDynamicSkills().catch((err) => {
+    logger.warn("sandbox: initDynamicSkills failed", { error: err?.message, ...ctx });
+  });
   let intentsConfig = { intents: {} };
   let workflowSourceConfig = { allowed: ["help_center", "notion_faq", "known_issue"] };
   try {
@@ -319,6 +321,7 @@ export async function runSandboxSimulation({
   const selectedSkill = skillResult?.selected_skill ?? null;
   const skillAccepted = skillResult?.handled ?? false;
   const decisionTrace = buildDecisionTrace({ shouldEscalate, status, selectedSkill, skillAccepted, replySource });
+  const registryDebug = getLastInitResult();
 
   logger.info("sandbox simulation completed", {
     category,
@@ -361,5 +364,12 @@ export async function runSandboxSimulation({
       : null,
 
     decision_trace: decisionTrace,
+
+    registry_debug: {
+      skills_table_configured: registryDebug.skillsTableConfigured,
+      loaded_skill_keys:       registryDebug.loadedSkillKeys,
+      registered_for_category: registryDebug.registeredByCategory[category] ?? [],
+      init_error:              registryDebug.error,
+    },
   };
 }

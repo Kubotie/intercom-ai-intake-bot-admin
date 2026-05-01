@@ -22,8 +22,10 @@ import {
 } from "./categories.js";
 import { isReadyForHandoff } from "./handoff-guard.js";
 import { runSkillOrchestration } from "./skills/orchestrator.js";
+import { initDynamicSkills, getSkillsForCategory } from "./skills/registry.js";
 import { resolveReplyMessage } from "./reply-resolver.js";
 import { getConciergeByKey, getMainConcierge } from "./nocodb-repo.js";
+import { getActiveWorkflow, parseWorkflowOverrides } from "./workflow-resolver.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
@@ -104,16 +106,29 @@ export async function runSandboxSimulation({
 
   logger.info("sandbox simulation started", { ...ctx, latestUserMessage, forceCategory, conciergeKey });
 
+  // ── 初期化: 動的スキルとワークフロー設定を読み込む ──────────────────────
+  await initDynamicSkills().catch(() => {});
+  let intentsConfig = { intents: {} };
+  try {
+    const workflow = await getActiveWorkflow();
+    intentsConfig = parseWorkflowOverrides(workflow).intentsConfig;
+  } catch { /* fallback */ }
+
+  // ワークフローのカスタムカテゴリを含む動的リスト
+  const workflowCategories = Object.keys(intentsConfig?.intents ?? {})
+    .filter(k => !CATEGORY_LIST.includes(k) && intentsConfig.intents[k]?.enabled !== false);
+  const dynamicCategoryList = [...CATEGORY_LIST, ...workflowCategories];
+
   // ── Step 1: Category classification ─────────────────────────────────────
-  let category = forceCategory && CATEGORY_LIST.includes(forceCategory) ? forceCategory : null;
+  let category = forceCategory && dynamicCategoryList.includes(forceCategory) ? forceCategory : null;
   let classifyConfidence = forceCategory ? 1.0 : 0;
   let classifyReason = forceCategory ? "forced" : null;
 
   if (!category) {
     if (config.llm.apiKey) {
       try {
-        const result = await classifyCategory({ latestUserMessage, categoryCandidates: CATEGORY_LIST });
-        category = CATEGORY_LIST.includes(result.category) ? result.category : FALLBACK_CATEGORY;
+        const result = await classifyCategory({ latestUserMessage, categoryCandidates: dynamicCategoryList });
+        category = dynamicCategoryList.includes(result.category) ? result.category : FALLBACK_CATEGORY;
         classifyConfidence = result.confidence ?? 0;
         classifyReason = result.reason ?? null;
       } catch (err) {
@@ -173,11 +188,21 @@ export async function runSandboxSimulation({
   const readyForHandoff = !shouldEscalate && isReadyForHandoff(category, slots);
   const status = readyForHandoff ? "ready_for_handoff" : "collecting";
 
-  // ── Step 5: Skill orchestration (knowledge-first, read-only NocoDB) ──────
+  // ── Step 5: Skill orchestration (read-only NocoDB) ──────────────────────
   let skillResult = null;
   let answerCandidateJson = {};
 
-  if (!shouldEscalate && status === "collecting" && KNOWLEDGE_FIRST_CATEGORIES.has(category)) {
+  // スキルを試す条件:
+  //   - エスカレーションなし
+  //   - collecting 状態、または ready_for_handoff でもスキルが設定されているカテゴリ
+  const intentCfg = intentsConfig?.intents?.[category];
+  const categoryHasSkills =
+    KNOWLEDGE_FIRST_CATEGORIES.has(category) ||
+    (intentCfg?.skills ?? []).length > 0 ||
+    getSkillsForCategory(category).length > 0;
+  const shouldTrySkill = !shouldEscalate && (status === "collecting" || (status === "ready_for_handoff" && categoryHasSkills));
+
+  if (shouldTrySkill) {
     const collectedSlots = Object.fromEntries(
       filledSlots.map((s) => [s.slot_name, s.slot_value])
     );

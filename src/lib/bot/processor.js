@@ -713,8 +713,8 @@ export async function processIntercomWebhook(payload) {
       if (ready) {
         handoffReason = resolveHandoffReason(session.category, allSlots);
 
-        if (KNOWLEDGE_FIRST_CATEGORIES.has(session.category)) {
-          // knowledge-first: skill を試してから handoff 判断する
+        if (KNOWLEDGE_FIRST_CATEGORIES.has(session.category) || intentOverride?.skills?.length > 0) {
+          // knowledge-first または workflow でスキルが設定されているカテゴリ: skill を試してから handoff 判断する
           handoffDeferredForSkill = true;
           logger.info("handoff deferred for knowledge skill evaluation", {
             sessionUid,

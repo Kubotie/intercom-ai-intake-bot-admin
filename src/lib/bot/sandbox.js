@@ -146,7 +146,9 @@ export async function runSandboxSimulation({
   ];
 
   // ── Step 1: Category classification ─────────────────────────────────────
-  let category = forceCategory && dynamicCategoryList.includes(forceCategory) ? forceCategory : null;
+  // forceCategory はテスト UI から渡す管理者指定値なので、dynamicCategoryList 検証を外して信頼する。
+  // バックエンドの intentsConfig に未保存のカスタムカテゴリでも強制適用できるようにする。
+  let category = forceCategory || null;
   let classifyConfidence = forceCategory ? 1.0 : 0;
   let classifyReason = forceCategory ? "forced" : null;
 

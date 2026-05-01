@@ -26,8 +26,8 @@ export const FALLBACK_REPLY =
 // 1件の返信に含まれる最大文字数 (保護)
 const MAX_REPLY_LENGTH = 1000;
 
-// skill 回答として有効な answer_type 一覧
-// 新しい skill を追加した際はここに追記する
+// skill 回答として有効な answer_type 一覧（静的スキル用）
+// 動的スキルは answer_type が任意の文字列になるため、非空文字列をすべて有効とする
 const SKILL_ANSWER_TYPES = new Set(["help_center_answer", "faq_answer", "known_bug_match", "soft_answer"]);
 
 function safeParseCandidate(raw) {
@@ -64,11 +64,6 @@ export function resolveReplyMessage({ answerCandidateJson, shouldEscalate, statu
     return { replyMessage: buildEscalationReply(authorName), replySource: "escalation" };
   }
 
-  // 優先度 2: handoff 準備完了 → 固定 handoff 文面
-  if (status === "ready_for_handoff") {
-    return { replyMessage: buildHandoffReply(authorName), replySource: "handoff" };
-  }
-
   // 優先度 3: すでに handed_off → 返信しない
   if (status === "handed_off") {
     return { replyMessage: null, replySource: "already_handed_off" };
@@ -76,13 +71,20 @@ export function resolveReplyMessage({ answerCandidateJson, shouldEscalate, statu
 
   const candidate = safeParseCandidate(answerCandidateJson);
 
-  // 優先度 4: skill 回答 (help_center_answer / known_bug_match / soft_answer 等)
-  // replySource には answer_type をそのまま使う (例: "known_bug_match")
-  if (SKILL_ANSWER_TYPES.has(candidate?.answer_type) && candidate?.answer_message) {
+  // 優先度 2: skill 回答 — 静的スキル (SKILL_ANSWER_TYPES) または動的スキル (非空 answer_type)
+  // ready_for_handoff 状態でもスキルが回答できた場合はスキル回答を優先する
+  const hasSkillAnswer = candidate?.answer_message && candidate?.answer_type &&
+    (SKILL_ANSWER_TYPES.has(candidate.answer_type) || String(candidate.answer_type).trim().length > 0);
+  if (hasSkillAnswer) {
     const replyMessage = String(candidate.answer_message).trim().slice(0, MAX_REPLY_LENGTH);
     if (replyMessage.length > 0) {
       return { replyMessage, replySource: candidate.answer_type };
     }
+  }
+
+  // 優先度 3a: handoff 準備完了 → 固定 handoff 文面
+  if (status === "ready_for_handoff") {
+    return { replyMessage: buildHandoffReply(authorName), replySource: "handoff" };
   }
 
   // 優先度 5: LLM 生成の next_message

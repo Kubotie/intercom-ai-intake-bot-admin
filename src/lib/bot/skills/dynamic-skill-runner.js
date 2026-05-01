@@ -6,6 +6,9 @@
 // 対応 source_type:
 //   - knowledge_chunks_search : knowledge_chunks テーブルを source_type/tags で絞り込んで LLM 回答
 //   - keyword_match           : NocoDB テーブルのキーワードマッチ（known-bug-match と同じ仕組み）
+//   - static_content          : スキルに直接貼り付けたコンテンツ（MDなど）を LLM に渡して回答
+//
+// 説明文（description）は prompt_template が未設定の場合に LLM への指示として使用される。
 // ─────────────────────────────────────────────
 
 import { config } from "../config.js";
@@ -33,21 +36,28 @@ function unwrapList(data) {
   return [];
 }
 
-// ── LLM 呼び出し（knowledge_chunks_search 用）──────────────────────────
+// ── システムプロンプト生成 ─────────────────────────────────────────────────
+// prompt_template が設定されていれば優先。なければ description を LLM 指示として使う。
 
-async function callLlmWithCandidates({ skillKey, promptTemplate, userQuery, candidates, authorName }) {
-  const customerLabel = authorName ? `${authorName}様` : "お客様";
-  const sourceContext = candidates
-    .map((c) => `## ${c.title}${c.url ? `\nURL: ${c.url}` : ""}\n\n${c.body || "(本文なし)"}`)
-    .join("\n\n---\n\n");
+function buildSystemPrompt({ promptTemplate, description, customerLabel }) {
+  if (promptTemplate) {
+    return promptTemplate.replace("{{customer_label}}", customerLabel);
+  }
 
-  const systemPrompt = promptTemplate
-    ? promptTemplate.replace("{{customer_label}}", customerLabel)
-    : `あなたは ${customerLabel} をサポートするサポートエージェントです。
-以下の参考記事を使い、顧客の質問に日本語で丁寧に回答してください。
-参考記事から回答できない場合は confidence を 0.3 以下にしてください。
+  const instruction = description
+    ? `${description}`
+    : `あなたは ${customerLabel} をサポートするサポートエージェントです。`;
+
+  return `${instruction}
+
+以下の参考情報を使い、顧客の質問に日本語で丁寧に回答してください。
+参考情報から回答できない場合は confidence を 0.3 以下にしてください。
 回答は必ず JSON で返してください: { "confidence": 0.0〜1.0, "answer_message": "回答文", "reason": "採用/不採用の理由" }`;
+}
 
+// ── LLM 呼び出し共通関数 ───────────────────────────────────────────────────
+
+async function callLlm({ systemPrompt, userContent }) {
   const res = await fetch(`${config.llm.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -60,7 +70,7 @@ async function callLlmWithCandidates({ skillKey, promptTemplate, userQuery, cand
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: userQuery + "\n\n参照記事:\n" + sourceContext },
+        { role: "user",   content: userContent },
       ],
     }),
   });
@@ -79,7 +89,7 @@ async function callLlmWithCandidates({ skillKey, promptTemplate, userQuery, cand
   }
 }
 
-// ── source_type: knowledge_chunks_search ───────────────────────────────
+// ── source_type: knowledge_chunks_search ───────────────────────────────────
 
 async function runKnowledgeChunksSearch(skillDef, sourceConfig, { latestUserMessage, category, collectedSlots, authorName }) {
   const allowedSourceTypes = sourceConfig.source_type_filter
@@ -114,14 +124,20 @@ async function runKnowledgeChunksSearch(skillDef, sourceConfig, { latestUserMess
     candidate_chunk_ids: candidates.map((c) => c.chunk_id).filter(Boolean),
   };
 
+  const customerLabel = authorName ? `${authorName}様` : "お客様";
+  const sourceContext = candidates
+    .map((c) => `## ${c.title}${c.url ? `\nURL: ${c.url}` : ""}\n\n${c.body || "(本文なし)"}`)
+    .join("\n\n---\n\n");
+
   let llmResult;
   try {
-    llmResult = await callLlmWithCandidates({
-      skillKey: skillDef.skill_key,
-      promptTemplate: skillDef.prompt_template || null,
-      userQuery: latestUserMessage,
-      candidates,
-      authorName: authorName || null,
+    llmResult = await callLlm({
+      systemPrompt: buildSystemPrompt({
+        promptTemplate: skillDef.prompt_template || null,
+        description: skillDef.description || null,
+        customerLabel,
+      }),
+      userContent: `${latestUserMessage}\n\n参照記事:\n${sourceContext}`,
     });
   } catch (err) {
     return {
@@ -162,7 +178,63 @@ async function runKnowledgeChunksSearch(skillDef, sourceConfig, { latestUserMess
   };
 }
 
-// ── source_type: keyword_match ─────────────────────────────────────────
+// ── source_type: static_content ────────────────────────────────────────────
+
+async function runStaticContent(skillDef, sourceConfig, { latestUserMessage, authorName }) {
+  const content = sourceConfig.content;
+  if (!content || !content.trim()) {
+    return notHandled("static_content: no content configured");
+  }
+
+  if (!config.llm.apiKey) {
+    return notHandled("LLM_API_KEY not set");
+  }
+
+  const customerLabel = authorName ? `${authorName}様` : "お客様";
+
+  let llmResult;
+  try {
+    llmResult = await callLlm({
+      systemPrompt: buildSystemPrompt({
+        promptTemplate: skillDef.prompt_template || null,
+        description: skillDef.description || null,
+        customerLabel,
+      }),
+      userContent: `${latestUserMessage}\n\n参照コンテンツ:\n${content}`,
+    });
+  } catch (err) {
+    return notHandled(`LLM failed: ${err?.message}`);
+  }
+
+  const confidence = typeof llmResult?.confidence === "number" ? llmResult.confidence : 0;
+  const answer_message = llmResult?.answer_message || null;
+
+  if (answer_message) {
+    return {
+      handled: true,
+      answer_type: skillDef.skill_key,
+      answer_message,
+      confidence,
+      sources: [{ title: skillDef.label || skillDef.skill_key, url: null }],
+      reason: llmResult.reason || null,
+      should_escalate: false,
+      next_action: "reply",
+    };
+  }
+
+  return {
+    handled: false,
+    answer_type: null,
+    answer_message: null,
+    confidence,
+    sources: [],
+    reason: llmResult?.reason || "LLM returned no answer_message",
+    should_escalate: false,
+    next_action: null,
+  };
+}
+
+// ── source_type: keyword_match ─────────────────────────────────────────────
 
 function computeKeywordScore(record, keywordField, searchText) {
   const raw = String(record[keywordField] || "");
@@ -239,7 +311,7 @@ async function runKeywordMatch(skillDef, sourceConfig, { latestUserMessage, coll
   };
 }
 
-// ── エントリーポイント ───────────────────────────────────────────────────
+// ── エントリーポイント ─────────────────────────────────────────────────────
 
 export async function runDynamicSkill(skillDef, { latestUserMessage, category, collectedSlots, authorName, sourcePriorityProfile }) {
   const sourceConfig = (() => {
@@ -255,6 +327,9 @@ export async function runDynamicSkill(skillDef, { latestUserMessage, category, c
   switch (skillDef.source_type) {
     case "knowledge_chunks_search":
       return runKnowledgeChunksSearch(skillDef, sourceConfig, { latestUserMessage, category, collectedSlots, authorName });
+
+    case "static_content":
+      return runStaticContent(skillDef, sourceConfig, { latestUserMessage, authorName });
 
     case "keyword_match":
       return runKeywordMatch(skillDef, sourceConfig, { latestUserMessage, collectedSlots });

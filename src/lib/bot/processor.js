@@ -171,16 +171,29 @@ async function persistSessionFields(rowId, patch, ctx) {
 // ─────────────────────────────────────────────
 // category 判定: LLM 未設定時は fallback
 // ─────────────────────────────────────────────
-async function runClassification(latestUserMessage, ctx) {
+async function runClassification(latestUserMessage, ctx, intentsConfig = null) {
   if (!config.llm.apiKey) {
     logger.info("category fallback used (LLM_API_KEY not set)", { category: FALLBACK_CATEGORY, confidence: 0, ...ctx });
     return { category: FALLBACK_CATEGORY, confidence: 0, reason: "LLM_API_KEY not configured" };
   }
 
+  // ワークフローのカスタムカテゴリをエンリッチして分類候補に追加
+  const customEntries = Object.entries(intentsConfig?.intents ?? {})
+    .filter(([k, v]) => !CATEGORY_LIST.includes(k) && v?.enabled !== false)
+    .map(([k, v]) => ({
+      key: k,
+      label: v.label ?? k,
+      description: [v.classifyDescription, v.nlInstruction].filter(Boolean).join(" / ").slice(0, 120),
+    }));
+  const allCandidates = customEntries.length > 0
+    ? [...CATEGORY_LIST, ...customEntries]
+    : CATEGORY_LIST;
+  const allKeys = [...CATEGORY_LIST, ...customEntries.map(e => e.key)];
+
   logger.info("category classification started", ctx);
   try {
-    const result = await classifyCategory({ latestUserMessage, categoryCandidates: CATEGORY_LIST });
-    const category = CATEGORY_LIST.includes(result.category) ? result.category : FALLBACK_CATEGORY;
+    const result = await classifyCategory({ latestUserMessage, categoryCandidates: allCandidates });
+    const category = allKeys.includes(result.category) ? result.category : FALLBACK_CATEGORY;
     const confidence = result.confidence ?? 0;
     const reason = result.reason ?? "";
     if (category !== result.category) {
@@ -604,7 +617,7 @@ export async function processIntercomWebhook(payload) {
 
   // ── 7b. カテゴリ判定 (category が未設定の session のみ) ──────────────────
   if (!session.category) {
-    const { category } = await runClassification(event.latest_user_message, { sessionUid, ...ctx });
+    const { category } = await runClassification(event.latest_user_message, { sessionUid, ...ctx }, workflowOverrides.intentsConfig);
     await updateSession(sessionRowId, { category });
     session = { ...session, category };
 

@@ -114,10 +114,23 @@ export async function runSandboxSimulation({
     intentsConfig = parseWorkflowOverrides(workflow).intentsConfig;
   } catch { /* fallback */ }
 
-  // ワークフローのカスタムカテゴリを含む動的リスト
-  const workflowCategories = Object.keys(intentsConfig?.intents ?? {})
-    .filter(k => !CATEGORY_LIST.includes(k) && intentsConfig.intents[k]?.enabled !== false);
-  const dynamicCategoryList = [...CATEGORY_LIST, ...workflowCategories];
+  // ワークフローのカスタムカテゴリを含む動的リスト（ラベル・説明付き）
+  const workflowCategoryEntries = Object.entries(intentsConfig?.intents ?? {})
+    .filter(([k, v]) => !CATEGORY_LIST.includes(k) && v?.enabled !== false)
+    .map(([k, v]) => ({
+      key: k,
+      label: v.label ?? k,
+      description: [v.classifyDescription, v.nlInstruction].filter(Boolean).join(" / ").slice(0, 120),
+    }));
+  const dynamicCategoryList = [
+    ...CATEGORY_LIST,
+    ...workflowCategoryEntries.map(e => e.key),
+  ];
+  // 分類器に渡すエンリッチ候補（テンプレートカテゴリはキーのみ、カスタムはラベル+説明付き）
+  const enrichedCandidates = [
+    ...CATEGORY_LIST,
+    ...workflowCategoryEntries,
+  ];
 
   // ── Step 1: Category classification ─────────────────────────────────────
   let category = forceCategory && dynamicCategoryList.includes(forceCategory) ? forceCategory : null;
@@ -127,7 +140,7 @@ export async function runSandboxSimulation({
   if (!category) {
     if (config.llm.apiKey) {
       try {
-        const result = await classifyCategory({ latestUserMessage, categoryCandidates: dynamicCategoryList });
+        const result = await classifyCategory({ latestUserMessage, categoryCandidates: enrichedCandidates });
         category = dynamicCategoryList.includes(result.category) ? result.category : FALLBACK_CATEGORY;
         classifyConfidence = result.confidence ?? 0;
         classifyReason = result.reason ?? null;

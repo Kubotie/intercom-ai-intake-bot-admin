@@ -41,16 +41,38 @@ export function buildInitialLayout(
   const edges: WorkflowEdge[] = [];
 
   // ── Category list: dynamic from intentsConfig, fallback to SORTED_CATEGORIES ─
+  //
+  // sandbox/processor と同じロジックで構築:
+  //   1. テンプレートカテゴリ: intentsConfig に無いか、enabled:false でなければ含める
+  //   2. カスタムカテゴリ:    intentsConfig に明示的に存在し enabled:false でなければ含める
+  //
+  // こうすることで "intents_config_json に書かれていないテンプレートカテゴリ" も
+  // キャンバスに存在し、sandbox が分類した結果をハイライトできる。
 
-  const categories: string[] = intentsConfig?.intents
-    ? Object.keys(intentsConfig.intents)
-        .filter(k => intentsConfig.intents[k]?.enabled !== false)
-        .sort((a, b) => {
-          const pa = intentsConfig.intents[a]?.classifyPriority ?? INTENT_META[a]?.priority ?? 99;
-          const pb = intentsConfig.intents[b]?.classifyPriority ?? INTENT_META[b]?.priority ?? 99;
-          return pa - pb;
-        })
-    : SORTED_CATEGORIES;
+  const TEMPLATE_CATEGORY_KEYS = Object.keys(INTENT_META); // SORTED_CATEGORIES のキー
+
+  const categories: string[] = (() => {
+    if (!intentsConfig?.intents) return SORTED_CATEGORIES;
+
+    const intents = intentsConfig.intents;
+
+    // テンプレートカテゴリ: 明示的に enabled:false にされていなければ含める
+    const templateCats = TEMPLATE_CATEGORY_KEYS.filter(k => {
+      const cfg = intents[k];
+      return !cfg || cfg.enabled !== false;
+    });
+
+    // カスタムカテゴリ: intentsConfig に明示的に存在し enabled:false でなければ含める
+    const customCats = Object.keys(intents).filter(
+      k => !TEMPLATE_CATEGORY_KEYS.includes(k) && intents[k]?.enabled !== false
+    );
+
+    return [...templateCats, ...customCats].sort((a, b) => {
+      const pa = intents[a]?.classifyPriority ?? INTENT_META[a]?.priority ?? 99;
+      const pb = intents[b]?.classifyPriority ?? INTENT_META[b]?.priority ?? 99;
+      return pa - pb;
+    });
+  })();
 
   // ── Entry node ────────────────────────────────────────────────────────────
 

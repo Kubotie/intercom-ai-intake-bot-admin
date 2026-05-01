@@ -20,6 +20,7 @@ import {
 import type { Concierge, TestTarget, WorkflowDefinition } from "@/lib/nocodb";
 import { buildInitialLayout }  from "@/lib/workflow-layout";
 import type { WorkflowNode, WorkflowEdge } from "@/lib/workflow-types";
+import { INTENT_META } from "@/lib/workflow-types";
 import type { WorkflowRunResult } from "@/lib/workflow-run-result";
 import {
   parseEditorConfig,
@@ -66,7 +67,7 @@ interface Props {
 // ── Inner canvas (inside ReactFlowProvider + Suspense) ────────────────────────
 
 function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Props) {
-  const { fitView }      = useReactFlow();
+  const { fitView, getNode, setCenter } = useReactFlow();
   const nodesInitialized = useNodesInitialized();
   const searchParams     = useSearchParams();
   const urlWorkflowKey = searchParams.get("workflow_key");
@@ -450,6 +451,21 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
     [runResult, concierges]
   );
 
+  // テスト結果が届いたら対応するインテントノードへ自動スクロール
+  useEffect(() => {
+    if (!runResult?.category) return;
+    const intentId = `intent-${runResult.category}`;
+    const timer = setTimeout(() => {
+      const node = getNode(intentId);
+      if (node) {
+        const x = node.position.x + (node.measured?.width ?? node.width ?? 220) / 2;
+        const y = node.position.y + (node.measured?.height ?? node.height ?? 120) / 2;
+        setCenter(x, y, { zoom: 1.1, duration: 600 });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [runResult?.category, getNode, setCenter]);
+
   // ── Derived node/edge state (filter + highlight) ──────────────────────────────
 
   const conciergeKeys = useMemo(
@@ -524,6 +540,22 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
           }}
           maskColor="rgba(244,244,246,0.7)"
         />
+        {/* テスト結果カテゴリバッジ */}
+        {runResult?.category && (
+          <Panel position="top-center">
+            <div className="bg-violet-600 text-white rounded-full px-4 py-1.5 shadow-lg flex items-center gap-2 text-[12px] font-semibold pointer-events-none">
+              <span className="opacity-70 text-[10px] font-normal">分類</span>
+              <span>{editorConfig.intentsConfig.intents[runResult.category]?.label ?? INTENT_META[runResult.category]?.label ?? runResult.category}</span>
+              {runResult.selectedSkill && (
+                <>
+                  <span className="opacity-50">›</span>
+                  <span className="opacity-90 font-normal text-[11px]">{runResult.selectedSkill}</span>
+                </>
+              )}
+            </div>
+          </Panel>
+        )}
+
         <Panel position="top-right">
           <div className="bg-white/95 border border-zinc-200 rounded-lg px-3 py-2.5 shadow-sm text-xs space-y-2.5" style={{ width: 220 }}>
             <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide">このキャンバスについて</p>

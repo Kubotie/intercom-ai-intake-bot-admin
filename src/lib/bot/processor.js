@@ -183,12 +183,15 @@ async function runClassification(latestUserMessage, ctx, intentsConfig = null) {
     .map(([k, v]) => ({
       key: k,
       label: v.label ?? k,
-      description: [v.classifyDescription, v.nlInstruction].filter(Boolean).join(" / ").slice(0, 120),
+      description: (v.classifyDescription ?? "").slice(0, 120),
     }));
-  const allCandidates = customEntries.length > 0
-    ? [...CATEGORY_LIST, ...customEntries]
-    : CATEGORY_LIST;
-  const allKeys = [...CATEGORY_LIST, ...customEntries.map(e => e.key)];
+  // ワークフロー設定で明示的に enabled:false のテンプレートカテゴリは除外
+  const enabledTemplateCats = CATEGORY_LIST.filter(k => {
+    const cfg = intentsConfig?.intents?.[k];
+    return !cfg || cfg.enabled !== false;
+  });
+  const allCandidates = [...enabledTemplateCats, ...customEntries];
+  const allKeys = [...enabledTemplateCats, ...customEntries.map(e => e.key)];
 
   logger.info("category classification started", ctx);
   try {
@@ -671,6 +674,11 @@ export async function processIntercomWebhook(payload) {
     ? mergeWorkflowSkillProfile({ orderOverrides: {}, confidenceOverrides: {}, disabled: [] }, effectiveSkillConfig)
     : null;
 
+  // workflow source_config_json → sourcePriorityProfile 形式に変換してスキルに渡す
+  const workflowSourceProfile = workflowOverrides.sourceConfig?.allowed?.length > 0
+    ? { allowedSources: workflowOverrides.sourceConfig.allowed }
+    : null;
+
   // ── 9. slot 抽出 ─────────────────────────────────────────────────────────
   // handed_off 後も slot の保存は継続する
   // workflow v2 intents_config[category].slots があればそれを使う
@@ -808,7 +816,8 @@ export async function processIntercomWebhook(payload) {
         category:     session.category,
         latestUserMessage: event.latest_user_message,
         collectedSlots,
-        skillProfile: workflowSkillProfile,  // workflow override (null = registry default)
+        skillProfile:        workflowSkillProfile,       // workflow override (null = registry default)
+        workflowSourceProfile,                           // workflow source_config_json → allowedSources
         ctx: { sessionUid, ...ctx }
       });
     } catch (err) {

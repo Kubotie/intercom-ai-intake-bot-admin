@@ -119,10 +119,10 @@ export function shouldUseSkillResult(result, skillEntry) {
  * skillProfile が渡された場合は applySkillProfileOrder で実行順・閾値を上書きする。
  * 優先度: workflow override > concierge profile > registry default
  *
- * @param {{ category: string, latestUserMessage: string, collectedSlots: object, skillProfile?: object, ctx: object }} opts
+ * @param {{ category: string, latestUserMessage: string, collectedSlots: object, skillProfile?: object, workflowSourceProfile?: object, ctx: object }} opts
  * @returns {Promise<OrchestrationResult>}
  */
-export async function runSkillOrchestration({ category, latestUserMessage, collectedSlots, skillProfile = null, ctx }) {
+export async function runSkillOrchestration({ category, latestUserMessage, collectedSlots, skillProfile = null, workflowSourceProfile = null, ctx }) {
   const baseSkills = getSkillsForCategory(category);
   const skills = skillProfile
     ? applySkillProfileOrder(baseSkills, category, skillProfile)
@@ -157,7 +157,7 @@ export async function runSkillOrchestration({ category, latestUserMessage, colle
 
     let result;
     try {
-      result = await skillEntry.run({ latestUserMessage, category, collectedSlots });
+      result = await skillEntry.run({ latestUserMessage, category, collectedSlots, sourcePriorityProfile: workflowSourceProfile });
 
       logger.info("skill executed", {
         category,

@@ -109,10 +109,18 @@ export async function runSandboxSimulation({
   // ── 初期化: 動的スキルとワークフロー設定を読み込む ──────────────────────
   await initDynamicSkills().catch(() => {});
   let intentsConfig = { intents: {} };
+  let workflowSourceConfig = { allowed: ["help_center", "notion_faq", "known_issue"] };
   try {
     const workflow = await getActiveWorkflow();
-    intentsConfig = parseWorkflowOverrides(workflow).intentsConfig;
+    const overrides = parseWorkflowOverrides(workflow);
+    intentsConfig = overrides.intentsConfig;
+    workflowSourceConfig = overrides.sourceConfig ?? workflowSourceConfig;
   } catch { /* fallback */ }
+
+  // workflow source_config_json → sourcePriorityProfile 形式に変換してスキルに渡す
+  const workflowSourceProfile = workflowSourceConfig?.allowed?.length > 0
+    ? { allowedSources: workflowSourceConfig.allowed }
+    : null;
 
   // ワークフローのカスタムカテゴリを含む動的リスト（ラベル・説明付き）
   const workflowCategoryEntries = Object.entries(intentsConfig?.intents ?? {})
@@ -120,15 +128,20 @@ export async function runSandboxSimulation({
     .map(([k, v]) => ({
       key: k,
       label: v.label ?? k,
-      description: [v.classifyDescription, v.nlInstruction].filter(Boolean).join(" / ").slice(0, 120),
+      description: (v.classifyDescription ?? "").slice(0, 120),
     }));
+  // ワークフロー設定で明示的に enabled:false のテンプレートカテゴリは除外
+  const enabledTemplateCats = CATEGORY_LIST.filter(k => {
+    const cfg = intentsConfig?.intents?.[k];
+    return !cfg || cfg.enabled !== false;
+  });
   const dynamicCategoryList = [
-    ...CATEGORY_LIST,
+    ...enabledTemplateCats,
     ...workflowCategoryEntries.map(e => e.key),
   ];
   // 分類器に渡すエンリッチ候補（テンプレートカテゴリはキーのみ、カスタムはラベル+説明付き）
   const enrichedCandidates = [
-    ...CATEGORY_LIST,
+    ...enabledTemplateCats,
     ...workflowCategoryEntries,
   ];
 
@@ -220,7 +233,7 @@ export async function runSandboxSimulation({
       filledSlots.map((s) => [s.slot_name, s.slot_value])
     );
     try {
-      skillResult = await runSkillOrchestration({ category, latestUserMessage, collectedSlots, ctx });
+      skillResult = await runSkillOrchestration({ category, latestUserMessage, collectedSlots, workflowSourceProfile, ctx });
       if (skillResult.handled) {
         answerCandidateJson = {
           answer_type:         skillResult.answer_type,

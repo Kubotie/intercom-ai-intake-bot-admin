@@ -100,10 +100,11 @@ ${expectedReply}
 
     const data = await res.json() as { choices: { message: { content: string } }[] };
     const raw  = data.choices?.[0]?.message?.content?.trim() ?? "{}";
+    const cleaned = raw.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
 
     let suggestion: ImprovementSuggestion;
     try {
-      const parsed = JSON.parse(raw);
+      const parsed = JSON.parse(cleaned);
       suggestion = {
         problem:    typeof parsed.problem    === "string" ? parsed.problem    : "分析失敗",
         root_cause: typeof parsed.root_cause === "string" ? parsed.root_cause : "unknown",

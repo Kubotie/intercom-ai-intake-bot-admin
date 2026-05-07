@@ -115,10 +115,11 @@ ${outcome}（全${turns.length}ターン）
 
     const data = await res.json() as { choices: { message: { content: string } }[] };
     const raw  = data.choices?.[0]?.message?.content?.trim() ?? "{}";
+    const cleaned = raw.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
 
     let analysis: ConversationAnalysis;
     try {
-      const parsed = JSON.parse(raw);
+      const parsed = JSON.parse(cleaned);
       analysis = {
         outcome: outcome as ConversationAnalysis["outcome"],
         total_turns: turns.length,

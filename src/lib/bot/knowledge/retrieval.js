@@ -129,18 +129,21 @@ async function fetchFromHelpCenter(query, limit) {
 
 /**
  * knowledge_chunks テーブルから source_type で検索する。
+ * searchChunks のキーワードスコア順を confidence_hint に反映する。
+ * (freshness_score * 0.6 は同順位チャンク間でしか有効でなかったため廃止)
  */
 async function fetchFromChunks(sourceType, query, limit) {
   try {
     const chunks = await searchChunks({ sourceTypes: [sourceType], query, limit });
-    return chunks.map((c) => ({
+    return chunks.map((c, idx) => ({
       chunk_id: c.chunk_id || null,
       source_type: c.source_type,
       source_name: c.source_name,
       title: c.title,
       body: c.body,
       url: c.url,
-      confidence_hint: c.freshness_score * 0.6,
+      // キーワード一致順を保持: rank1=1.0, rank2=0.85, rank3=0.70 ...
+      confidence_hint: Math.max(1.0 - idx * 0.15, 0.1),
       reason: `chunk_search:${sourceType}`,
       published_to_bot: c.published_to_bot
     }));
@@ -161,7 +164,7 @@ async function fetchFromChunks(sourceType, query, limit) {
 export function buildQuery(category, latestUserMessage, collectedSlots) {
   const parts = [];
 
-  if (category === "experience_issue") {
+  if (["ab_test_experience", "heatmap_analytics", "popup_event"].includes(category)) {
     if (collectedSlots?.experience_name) parts.push(collectedSlots.experience_name);
     if (collectedSlots?.symptom) {
       parts.push(collectedSlots.symptom);
@@ -169,10 +172,20 @@ export function buildQuery(category, latestUserMessage, collectedSlots) {
       const expanded = expandSymptomKeywords(collectedSlots.symptom);
       if (expanded) parts.push(expanded);
     }
-  } else if (category === "usage_guidance") {
+    if (collectedSlots?.target_url) parts.push(collectedSlots.target_url);
+  } else if (category === "usage_guidance" || category === "customization_integration") {
     if (collectedSlots?.target_feature) parts.push(collectedSlots.target_feature);
     if (collectedSlots?.user_goal) parts.push(collectedSlots.user_goal);
     if (collectedSlots?.feature_category) parts.push(collectedSlots.feature_category);
+    if (collectedSlots?.third_party_tool) parts.push(collectedSlots.third_party_tool);
+  } else if (category === "experience_issue") {
+    // 後方互換: 旧カテゴリのセッションが残っている場合のフォールバック
+    if (collectedSlots?.experience_name) parts.push(collectedSlots.experience_name);
+    if (collectedSlots?.symptom) {
+      parts.push(collectedSlots.symptom);
+      const expanded = expandSymptomKeywords(collectedSlots.symptom);
+      if (expanded) parts.push(expanded);
+    }
   } else {
     if (collectedSlots?.symptom) parts.push(collectedSlots.symptom);
   }

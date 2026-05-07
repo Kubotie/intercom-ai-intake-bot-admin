@@ -29,7 +29,7 @@ import { getActiveWorkflow, parseWorkflowOverrides } from "./workflow-resolver.j
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
-const KNOWLEDGE_FIRST_CATEGORIES = new Set(["usage_guidance", "experience_issue"]);
+const KNOWLEDGE_FIRST_CATEGORIES = new Set(["usage_guidance", "ab_test_experience", "heatmap_analytics", "popup_event", "customization_integration"]);
 const ESCALATION_KEYWORDS = ["至急", "緊急", "全く使えない", "障害", "返金", "全員使えない", "全社員", "本番が止まっている"];
 const FALLBACK_CATEGORY = "usage_guidance";
 
@@ -89,6 +89,9 @@ function buildDecisionTrace({ shouldEscalate, status, selectedSkill, skillAccept
  *   conciergeKey?: string|null,
  *   conversationId?: string|null,
  *   contactId?: string|null,
+ *   prevCategory?: string|null,
+ *   prevSlots?: Record<string, {value: string, confidence: number}>,
+ *   messageOrder?: number,
  * }} opts
  */
 export async function runSandboxSimulation({
@@ -97,6 +100,9 @@ export async function runSandboxSimulation({
   conciergeKey = null,
   conversationId = null,
   contactId = null,
+  prevCategory = null,
+  prevSlots = {},
+  messageOrder = 1,
 }) {
   const ctx = {
     sandbox: true,
@@ -149,10 +155,10 @@ export async function runSandboxSimulation({
 
   // ── Step 1: Category classification ─────────────────────────────────────
   // forceCategory はテスト UI から渡す管理者指定値なので、dynamicCategoryList 検証を外して信頼する。
-  // バックエンドの intentsConfig に未保存のカスタムカテゴリでも強制適用できるようにする。
-  let category = forceCategory || null;
-  let classifyConfidence = forceCategory ? 1.0 : 0;
-  let classifyReason = forceCategory ? "forced" : null;
+  // prevCategory はマルチターン時に前ターンで確定したカテゴリを引き継ぐ（再分類しない）。
+  let category = forceCategory || prevCategory || null;
+  let classifyConfidence = (forceCategory || prevCategory) ? 1.0 : 0;
+  let classifyReason = forceCategory ? "forced" : prevCategory ? `locked(turn${messageOrder})` : null;
 
   if (!category) {
     if (config.llm.apiKey) {
@@ -182,7 +188,8 @@ export async function runSandboxSimulation({
 
   // ── Step 3: Slot extraction (in-memory, no DB write) ─────────────────────
   const requiredSlotNames = REQUIRED_SLOTS_BY_CATEGORY[category] || [];
-  let extractedSlotMap = {};
+  // マルチターン: prevSlots を基底として、今ターンの抽出で上書き/追加する
+  let extractedSlotMap = { ...prevSlots };
 
   if (requiredSlotNames.length > 0 && !shouldEscalate && config.llm.apiKey) {
     try {
@@ -239,13 +246,21 @@ export async function runSandboxSimulation({
     try {
       skillResult = await runSkillOrchestration({ category, latestUserMessage, collectedSlots, workflowSourceProfile, ctx });
       if (skillResult.handled) {
+        // faq_answer など一部スキルは retrieval_query/candidate_titles を
+        // answer_candidate_json (JSON文字列) の中に格納するため、パースして展開する
+        let skillCandidateDetail = {};
+        try {
+          if (skillResult.answer_candidate_json) {
+            skillCandidateDetail = JSON.parse(skillResult.answer_candidate_json);
+          }
+        } catch { /* ignore */ }
         answerCandidateJson = {
           answer_type:         skillResult.answer_type,
           answer_message:      skillResult.answer_message,
           confidence:          skillResult.confidence,
-          retrieval_query:     skillResult.retrieval_query ?? null,
-          candidate_titles:    skillResult.candidate_titles ?? [],
-          candidate_chunk_ids: skillResult.candidate_chunk_ids ?? [],
+          retrieval_query:     skillResult.retrieval_query     ?? skillCandidateDetail.retrieval_query     ?? null,
+          candidate_titles:    skillResult.candidate_titles    ?? skillCandidateDetail.candidate_titles    ?? [],
+          candidate_chunk_ids: skillResult.candidate_chunk_ids ?? skillCandidateDetail.candidate_chunk_ids ?? [],
           skill_candidates:    skillResult.candidate_results ?? [],
           selected_skill:      skillResult.selected_skill,
         };
@@ -370,6 +385,12 @@ export async function runSandboxSimulation({
       loaded_skill_keys:       registryDebug.loadedSkillKeys,
       registered_for_category: registryDebug.registeredByCategory[category] ?? [],
       init_error:              registryDebug.error,
+    },
+
+    // マルチターン用: 次ターンに渡す累積状態
+    next_turn_state: {
+      category,
+      slots: extractedSlotMap,
     },
   };
 }

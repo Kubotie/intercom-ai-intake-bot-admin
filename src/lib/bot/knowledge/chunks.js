@@ -92,8 +92,15 @@ function scoreAndRankChunks(chunks, query) {
 
   return chunks
     .map((c) => {
-      const haystack = `${c.title} ${c.tags.join(" ")} ${c.body.slice(0, 400)}`;
-      const score = keywords.reduce((sum, kw) => sum + (haystack.includes(kw) ? 1 : 0), 0);
+      const titleHaystack = c.title.toLowerCase();
+      const bodyHaystack  = `${c.tags.join(" ")} ${c.body.slice(0, 600)}`.toLowerCase();
+      const score = keywords.reduce((sum, kw) => {
+        const k = kw.toLowerCase();
+        // タイトルマッチは3点、ボディ/タグマッチは1点
+        if (titleHaystack.includes(k)) return sum + 3;
+        if (bodyHaystack.includes(k))  return sum + 1;
+        return sum;
+      }, 0);
       return { c, score };
     })
     .sort((a, b) => b.score - a.score || b.c.freshness_score - a.c.freshness_score)
@@ -115,22 +122,31 @@ function extractKeywords(query) {
   const add = (kw) => {
     const k = kw.trim();
     if (k.length >= 2 && !seen.has(k)) { seen.add(k); result.push(k); }
-    // 丁寧語 → 普通体 の正規化バージョンも追加
     const normalized = normalizePoliteNegation(k);
     if (normalized !== k && !seen.has(normalized)) { seen.add(normalized); result.push(normalized); }
   };
 
-  for (const part of query.split(/\s+/)) {
-    const clean = part.replace(/[、。？！「」（）]/g, "").trim();
+  // 句読点・記号を除去してスペース分割
+  const cleaned = query.replace(/[、。？！「」（）()【】『』\[\]]/g, " ");
+  for (const part of cleaned.split(/\s+/)) {
+    const clean = part.trim();
     if (clean.length < 2) continue;
 
     if (clean.length <= 10) {
       add(clean);
     } else {
-      // 助詞で分割して名詞句を抽出 (例: "ポップアップが表示されません" → ["ポップアップ", "表示されません"])
-      const segs = clean.split(/[がはをにでとのもてか]+/).filter((s) => s.length >= 2);
-      segs.slice(0, 3).forEach(add);
-      add(clean.slice(0, 6)); // 先頭6文字もフォールバック
+      // ① 日本語助詞ランで分割（既存ロジック）
+      const particleSegs = clean.split(/[がはをにでとのもてか]+/).filter((s) => s.length >= 2);
+      particleSegs.slice(0, 4).forEach(add);
+
+      // ② ひらがなランで分割 → 漢字・カタカナ・英数字の意味語を抽出
+      //    例: "有料プラン解約した場合Experience" → ["有料プラン解約", "場合Experience"]
+      //    例: "閲覧できないでしょうか" → ["閲覧"]
+      const hiraSegs = clean.split(/[ぁ-ん]+/).filter((s) => s.length >= 2);
+      hiraSegs.slice(0, 4).forEach(add);
+
+      // ③ 先頭6文字のフォールバック
+      add(clean.slice(0, 6));
     }
   }
   return result;

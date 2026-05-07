@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { categoryBadge, replySourceBadge } from "@/components/ui/badge";
-import { FlaskConical, Send, ChevronDown, Zap, BookOpen, ExternalLink, MessageSquare, Search, PlayCircle, AlertTriangle, CheckCircle2, AlertCircle, Info, Pencil, Copy } from "lucide-react";
+import { FlaskConical, Send, ChevronDown, Zap, BookOpen, ExternalLink, MessageSquare, Search, PlayCircle, AlertTriangle, CheckCircle2, AlertCircle, Info, Pencil, Copy, Database, ArrowRight, RefreshCw } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -858,34 +858,46 @@ export default function SandboxPage() {
                                 className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-amber-600 transition-colors"
                               >
                                 <Pencil size={10} />
-                                {corrections[turn.turn]?.isExpanded ? "修正入力を閉じる" : "期待する回答と異なる場合"}
+                                {corrections[turn.turn]?.isExpanded ? "フィードバックを閉じる" : "回答を改善したい場合"}
                               </button>
 
                               {corrections[turn.turn]?.isExpanded && (
                                 <div className="mt-2 space-y-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                                  <p className="text-[10px] font-semibold text-amber-800">正しい回答を入力</p>
+                                  <div>
+                                    <p className="text-[10px] font-semibold text-amber-800 mb-0.5">① 何が問題だったかを書く</p>
+                                    <p className="text-[10px] text-amber-700 leading-relaxed">
+                                      本来どう答えるべきだったか、何が足りなかったかを説明してください。
+                                      「改善アクションを生成」で Knowledge / Workflow への具体的な修正案が出ます。
+                                    </p>
+                                  </div>
                                   <textarea
                                     value={corrections[turn.turn]?.expectedAnswer ?? ""}
                                     onChange={e => updateExpectedAnswer(turn.turn, e.target.value)}
                                     rows={4}
-                                    placeholder="ここに本来の正しい回答を貼り付けてください"
+                                    placeholder={"例:\n・プラン提案は不要で、URLを確認してから技術調査に進むべきだった\n・「ボットアクセスのPV除外は標準機能にない」という正確な回答をすべきだった"}
                                     className="w-full text-xs px-2.5 py-2 rounded border border-amber-200 bg-white resize-none outline-none focus:ring-1 focus:ring-amber-300 leading-relaxed"
                                   />
                                   <button
                                     onClick={() => generateImprovement(turn)}
                                     disabled={!corrections[turn.turn]?.expectedAnswer?.trim() || corrections[turn.turn]?.isGenerating}
-                                    className="w-full text-xs px-3 py-1.5 rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-40 font-medium transition-colors"
+                                    className="w-full text-xs px-3 py-1.5 rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-40 font-medium transition-colors flex items-center justify-center gap-1.5"
                                   >
-                                    {corrections[turn.turn]?.isGenerating ? "分析中…" : "改善アクションを生成"}
+                                    {corrections[turn.turn]?.isGenerating
+                                      ? <><div className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" /> 分析中…</>
+                                      : <><Zap size={11} /> ② 改善アクションを生成</>}
                                   </button>
 
                                   {corrections[turn.turn]?.suggestion && (() => {
                                     const s = corrections[turn.turn].suggestion!;
+                                    const hasFaqAction       = s.actions.some(a => a.type === "add_faq");
+                                    const hasPolicyAction    = s.actions.some(a => a.type === "update_knowledge" || a.type === "adjust_workflow");
+                                    const hasSkillAction     = s.actions.some(a => a.type === "add_skill");
+                                    const hasKnowledgeAction = hasFaqAction;
                                     return (
                                       <div className="space-y-2 pt-1 border-t border-amber-200">
                                         {/* 問題と根本原因 */}
                                         <div className="space-y-0.5">
-                                          <p className="text-[10px] font-semibold text-amber-800">問題</p>
+                                          <p className="text-[10px] font-semibold text-amber-800">特定された問題</p>
                                           <p className="text-xs text-zinc-700 leading-relaxed">{s.problem}</p>
                                           <span className="inline-block text-[9px] font-mono bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200 mt-0.5">
                                             root_cause: {s.root_cause}
@@ -895,7 +907,7 @@ export default function SandboxPage() {
                                         {/* 改善アクション */}
                                         {s.actions.length > 0 && (
                                           <div className="space-y-2">
-                                            <p className="text-[10px] font-semibold text-amber-800">改善アクション ({s.actions.length})</p>
+                                            <p className="text-[10px] font-semibold text-amber-800">改善アクション ({s.actions.length}件)</p>
                                             {s.actions.map((action, i) => (
                                               <div key={i} className="bg-white border border-amber-100 rounded-lg p-3 space-y-1.5">
                                                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -926,6 +938,52 @@ export default function SandboxPage() {
                                             ))}
                                           </div>
                                         )}
+
+                                        {/* ③ 次のステップへのナビゲーション */}
+                                        <div className="pt-1.5 border-t border-amber-200 space-y-1.5">
+                                          <p className="text-[10px] font-semibold text-amber-800">③ 次のステップ — 上の内容を反映する</p>
+                                          <div className="flex flex-wrap gap-1.5">
+                                            {hasKnowledgeAction && (
+                                              <a
+                                                href={`/knowledge?from=sandbox&root_cause=${encodeURIComponent(s.root_cause)}`}
+                                                className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1.5 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 font-medium transition-colors">
+                                                <Database size={10} /> Knowledge を更新 <ArrowRight size={9} />
+                                              </a>
+                                            )}
+                                            {hasPolicyAction && (() => {
+                                              const policyAction = s.actions.find(a => a.type === "update_knowledge" || a.type === "adjust_workflow");
+                                              const actionType = policyAction?.type ?? "adjust_workflow";
+                                              return (
+                                                <a
+                                                  href={`/policies?from=sandbox&root_cause=${encodeURIComponent(s.root_cause)}&action_type=${encodeURIComponent(actionType)}`}
+                                                  className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1.5 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 font-medium transition-colors">
+                                                  <BookOpen size={10} /> Policies を修正 <ArrowRight size={9} />
+                                                </a>
+                                              );
+                                            })()}
+                                            {hasSkillAction && (() => {
+                                              const skillAction = s.actions.find(a => a.type === "add_skill");
+                                              const params = new URLSearchParams({ from: "sandbox", root_cause: s.root_cause });
+                                              if (skillAction?.title)   params.set("skill_title",   skillAction.title);
+                                              if (skillAction?.content) params.set("skill_content", skillAction.content);
+                                              return (
+                                                <a
+                                                  href={`/skills?${params.toString()}`}
+                                                  className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1.5 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 font-medium transition-colors">
+                                                  <Zap size={10} /> Skills を追加・修正 <ArrowRight size={9} />
+                                                </a>
+                                              );
+                                            })()}
+                                            {!hasKnowledgeAction && !hasPolicyAction && !hasSkillAction && (
+                                              <a
+                                                href={`/policies?from=sandbox&root_cause=${encodeURIComponent(s.root_cause)}`}
+                                                className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1.5 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 font-medium transition-colors">
+                                                <BookOpen size={10} /> Policies を確認 <ArrowRight size={9} />
+                                              </a>
+                                            )}
+                                          </div>
+                                          <p className="text-[9px] text-amber-600">反映後、同じシナリオで再シミュレーションして改善を確認してください。</p>
+                                        </div>
                                       </div>
                                     );
                                   })()}
@@ -1044,6 +1102,40 @@ export default function SandboxPage() {
                         問題点は検出されませんでした
                       </div>
                     )}
+
+                    {/* 次のステップ */}
+                    <div className="pt-3 border-t border-[var(--border-subtle)]">
+                      <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-2">次のステップ</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => { setConvHistory([]); setConvAnalysis(null); runConversation(); }}
+                          className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 font-medium transition-colors"
+                        >
+                          <RefreshCw size={11} /> 同じシナリオで再実行
+                        </button>
+                        <button
+                          onClick={() => { setConvHistory([]); setConvAnalysis(null); setInitialMessage(""); setScenarioContext(""); setConvPhase("idle"); }}
+                          className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 font-medium transition-colors"
+                        >
+                          <PlayCircle size={11} /> 新しいシナリオを試す
+                        </button>
+                        {convAnalysis.issues.some(i => i.area === "reply" || i.area === "skill") && (
+                          <a href="/knowledge" className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 font-medium transition-colors">
+                            <Database size={11} /> Knowledge を更新 <ArrowRight size={10} />
+                          </a>
+                        )}
+                        {convAnalysis.issues.some(i => i.area === "workflow" || i.area === "handoff") && (
+                          <a href="/workflows" className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 font-medium transition-colors">
+                            <ExternalLink size={11} /> Workflows を確認 <ArrowRight size={10} />
+                          </a>
+                        )}
+                      </div>
+                      {convAnalysis.issues.length > 0 && (
+                        <p className="text-[10px] text-zinc-400 mt-2">
+                          各ターンの「回答を改善したい場合」からフィードバックを入力すると、具体的な修正案が生成されます。
+                        </p>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               )}

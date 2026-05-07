@@ -1,19 +1,22 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Zap, CheckCircle2, Clock, PauseCircle, Plus, Pencil, Trash2, X, Save, ChevronDown, ChevronUp, FileText } from "lucide-react";
+import { Zap, CheckCircle2, Clock, PauseCircle, Plus, Pencil, Trash2, X, Save, ChevronDown, ChevronUp, FileText, AlertTriangle, ArrowRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { SkillDefinition } from "@/lib/nocodb";
 
 // ── カテゴリラベル ───────────────────────────────────────────────────────
 const CATEGORY_LABELS: Record<string, string> = {
-  usage_guidance:   "使い方・操作",
-  experience_issue: "体験・問題",
-  bug_report:       "バグ報告",
-  billing_contract: "請求・契約",
-  login_account:    "ログイン・アカウント",
-  tracking_issue:   "計測・タグ",
-  general_inquiry:  "その他",
+  usage_guidance:            "使い方・操作",
+  ab_test_experience:        "ABテスト・体験",
+  heatmap_analytics:         "ヒートマップ・解析",
+  popup_event:               "ポップアップ・イベント",
+  customization_integration: "カスタマイズ・連携",
+  bug_report:                "バグ報告",
+  billing_contract:          "請求・契約",
+  login_account:             "ログイン・アカウント",
+  tracking_issue:            "計測・タグ",
+  general_inquiry:           "その他",
 };
 
 const ALL_CATEGORIES = Object.keys(CATEGORY_LABELS);
@@ -327,6 +330,10 @@ function SkillForm({
 
 // ── メインページ ────────────────────────────────────────────────────────────
 export default function SkillsPage() {
+  const [fromSandbox,   setFromSandbox]   = useState(false);
+  const [skillTitle,    setSkillTitle]    = useState("");
+  const [skillContent,  setSkillContent]  = useState("");
+
   const [skills, setSkills] = useState<SkillDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -343,6 +350,14 @@ export default function SkillsPage() {
     }
   }
 
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const isSandbox = p.get("from") === "sandbox";
+    setFromSandbox(isSandbox);
+    setSkillTitle(p.get("skill_title") ?? "");
+    setSkillContent(p.get("skill_content") ?? "");
+    if (isSandbox) setShowNewForm(true);
+  }, []);
   useEffect(() => { load(); }, []);
 
   async function handleCreate(form: Partial<SkillDefinition>) {
@@ -394,6 +409,61 @@ export default function SkillsPage() {
           スキルを追加
         </button>
       </div>
+
+      {/* Sandbox コンテキストバナー */}
+      {fromSandbox && (
+        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-amber-800">新しいスキルの追加が推奨されています</p>
+              <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
+                Sandbox の改善提案に基づいて、このパターンを処理できるスキルを追加してください。フォームは自動的に開かれています。
+              </p>
+            </div>
+          </div>
+
+          {(skillTitle || skillContent) && (
+            <div className="bg-white rounded-md border border-amber-200 p-3 space-y-1.5">
+              <p className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">Sandbox が提案したスキル内容</p>
+              {skillTitle && (
+                <div className="text-xs text-zinc-700">
+                  <span className="font-medium text-zinc-500 mr-1">スキル名：</span>{skillTitle}
+                </div>
+              )}
+              {skillContent && (
+                <div className="text-xs text-zinc-700 leading-relaxed">
+                  <span className="font-medium text-zinc-500 block mb-0.5">推奨内容：</span>
+                  <span className="text-zinc-600 whitespace-pre-wrap">{skillContent}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="bg-white rounded-md border border-amber-200 p-3 space-y-2">
+            <p className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">対応手順</p>
+            <ol className="text-xs text-zinc-700 space-y-2 list-none">
+              <li className="flex items-start gap-2">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold flex items-center justify-center mt-0.5">1</span>
+                <span>下に表示されている <strong>「新規スキルを追加」</strong> フォームに、上の推奨内容を参考にスキル名・説明・対象 Intent を入力する</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold flex items-center justify-center mt-0.5">2</span>
+                <span>Source Type を <strong>「直接入力」</strong> にして、推奨内容のテキストを貼り付けて保存</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold flex items-center justify-center mt-0.5">3</span>
+                <span>保存後、Sandbox で同じシナリオを再実行してスキルが発動することを確認</span>
+              </li>
+            </ol>
+          </div>
+          <a href="/sandbox"
+            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-50 font-medium transition-colors">
+            <Zap size={12} /> Sandbox に戻る <ArrowRight size={11} />
+          </a>
+        </div>
+      )}
+
 
       {showNewForm && (
         <div className="mb-4">

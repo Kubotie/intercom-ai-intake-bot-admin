@@ -1,7 +1,7 @@
 /**
  * auto-faq.js
  *
- * Intercom の conversation.tag.created webhook を受けて、
+ * Intercom の conversation_part.tag.created webhook を受けて、
  * 会話を自動で FAQ 化し Notion FAQ2 DB → NocoDB knowledge_chunks に同期する。
  *
  * トリガータグ: 環境変数 AUTO_FAQ_TAG_NAME (デフォルト: "FAQ化")
@@ -136,21 +136,24 @@ async function generateFaqFromConversation(conversationParts) {
 // ─── タグペイロード解析 ──────────────────────────────────────────────────────
 
 export function extractTagEvent(payload) {
-  // conversation.tag.created ペイロード:
-  // { topic: "conversation.tag.created", data: { item: { type: "conversation", id, tags: { tags: [{ name }] } } } }
-  // または
-  // { topic: "conversation.tag.created", data: { item: { type: "tag", name, applied_to: { type: "conversation", id } } } }
+  // conversation_part.tag.created ペイロード:
+  // { topic: "conversation_part.tag.created", data: { item: { type: "conversation_part", conversation_id: "...", tag: { name: "..." } } } }
+  // または conversation.id を持つ場合:
+  // { ..., data: { item: { type: "conversation_part", conversation: { id: "..." }, tag: { name: "..." } } } }
+  // フォールバック: 旧形式 conversation.tag.created も処理できるよう残す
   const item = payload?.data?.item ?? {};
 
   let tagName = null;
   let conversationId = null;
 
-  if (item.type === "tag") {
-    // パターン A: item が tag そのもの
+  if (item.type === "conversation_part") {
+    // conversation_part.tag.created: tag 情報は item.tag
+    tagName = item.tag?.name ?? null;
+    conversationId = item.conversation_id ?? item.conversation?.id ?? null;
+  } else if (item.type === "tag") {
     tagName = item.name ?? null;
     conversationId = item.applied_to?.id ?? null;
   } else if (item.type === "conversation") {
-    // パターン B: item が conversation で tags を含む
     conversationId = item.id ?? null;
     const tags = item.tags?.tags ?? item.tags ?? [];
     if (Array.isArray(tags) && tags.length > 0) {

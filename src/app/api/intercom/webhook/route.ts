@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
   logRawPayload(payload, { topic, conversation_id: convId as string | null });
 
   // ── タグ付け → 自動 FAQ 化 ───────────────────────────────────────────────
-  if (topic === "conversation.tag.created") {
+  if (topic === "conversation_part.tag.created") {
     processAutoFaq(payload).then((result) => {
       if (result.skipped) {
         logger.info("auto-faq: skipped", { reason: result.reason });

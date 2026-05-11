@@ -1,12 +1,29 @@
 import {
   queryDatabase,
-  buildBodyFromProperties,
   getPageText,
   resolvePublishedToBot,
   getPageTitle,
   getPageTags,
-  getPageUrl
+  getPageUrl,
+  getRichTextProp
 } from "./notion-client.js";
+
+/**
+ * FAQ2 データベース専用の body ビルダー。
+ * プロパティ: Question (rich_text), 修正後Answer (rich_text), Answer (rich_text), メモ (rich_text)
+ */
+function buildBodyFaq2(page) {
+  const question = getRichTextProp(page, "Question");
+  const correctedAnswer = getRichTextProp(page, "修正後Answer");
+  const answer = correctedAnswer || getRichTextProp(page, "Answer");
+  const memo = getRichTextProp(page, "メモ");
+
+  const parts = [];
+  if (question) parts.push(`Q: ${question}`);
+  if (answer)   parts.push(`A: ${answer}`);
+  if (memo)     parts.push(`メモ: ${memo}`);
+  return parts.join("\n");
+}
 import { listRecords, createRecord, updateRecord } from "../nocodb.js";
 import { config } from "../config.js";
 
@@ -37,7 +54,7 @@ async function pageToChunk(page) {
   const defaultPub = getDefaultPublishedToBot();
   const { value: publishedToBot } = resolvePublishedToBot(page, defaultPub);
 
-  let body = buildBodyFromProperties(page);
+  let body = buildBodyFaq2(page);
   let bodySource = "properties";
 
   if (!body) {

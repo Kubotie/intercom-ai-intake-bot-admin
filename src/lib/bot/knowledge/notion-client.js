@@ -142,7 +142,7 @@ function richTextToString(richTexts) {
   return richTexts.map((r) => r.plain_text ?? "").join("").trim();
 }
 
-function getRichTextProp(page, propName) {
+export function getRichTextProp(page, propName) {
   const prop = page.properties?.[propName];
   if (!prop || prop.type !== "rich_text") return "";
   return richTextToString(prop.rich_text ?? []);

@@ -261,6 +261,7 @@ export default function SandboxPage() {
   const [logLoading,       setLogLoading]       = useState(false);
   const [showLogList,      setShowLogList]      = useState(false);
   const [corrections,      setCorrections]      = useState<Record<number, TurnCorrection>>({});
+  const [faqAddStatus,     setFaqAddStatus]     = useState<Record<string, { status: "idle" | "loading" | "done" | "error"; message?: string }>>({});
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -509,6 +510,26 @@ export default function SandboxPage() {
         ...prev,
         [turn.turn]: { ...prev[turn.turn], isGenerating: false },
       }));
+    }
+  };
+
+  const addFaqToKnowledge = async (key: string, action: ImprovementActionItem) => {
+    setFaqAddStatus(prev => ({ ...prev, [key]: { status: "loading" } }));
+    try {
+      const res = await fetch("/api/knowledge/add-faq", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: action.title, content: action.content }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error ?? "追加失敗");
+      const stats = data.sync_stats;
+      const msg = stats
+        ? `完了 — 新規 ${stats.created ?? 0} 件 / 更新 ${stats.updated ?? 0} 件`
+        : data.sync_error ? `Notion 追加済み（同期エラー: ${data.sync_error}）` : "完了";
+      setFaqAddStatus(prev => ({ ...prev, [key]: { status: "done", message: msg } }));
+    } catch (err: unknown) {
+      setFaqAddStatus(prev => ({ ...prev, [key]: { status: "error", message: (err as Error).message } }));
     }
   };
 
@@ -909,7 +930,10 @@ export default function SandboxPage() {
                                         {s.actions.length > 0 && (
                                           <div className="space-y-2">
                                             <p className="text-[10px] font-semibold text-amber-800">改善アクション ({s.actions.length}件)</p>
-                                            {s.actions.map((action, i) => (
+                                            {s.actions.map((action, i) => {
+                                              const faqKey = `${turn.turn}-${i}`;
+                                              const faqSt  = faqAddStatus[faqKey];
+                                              return (
                                               <div key={i} className="bg-white border border-amber-100 rounded-lg p-3 space-y-1.5">
                                                 <div className="flex items-center gap-1.5 flex-wrap">
                                                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
@@ -935,8 +959,36 @@ export default function SandboxPage() {
                                                     <Copy size={10} />
                                                   </button>
                                                 </div>
+                                                {action.type === "add_faq" && (
+                                                  <div className="pt-1 space-y-1">
+                                                    {(!faqSt || faqSt.status === "idle") && (
+                                                      <button
+                                                        onClick={() => addFaqToKnowledge(faqKey, action)}
+                                                        className="w-full flex items-center justify-center gap-1.5 text-[10px] py-1.5 px-2 rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium transition-colors"
+                                                      >
+                                                        <Database size={10} /> 1クリックで FAQ に追加・同期
+                                                      </button>
+                                                    )}
+                                                    {faqSt?.status === "loading" && (
+                                                      <p className="text-[10px] text-center text-zinc-500 flex items-center justify-center gap-1">
+                                                        <RefreshCw size={9} className="animate-spin" /> Notion に追加中・同期中…
+                                                      </p>
+                                                    )}
+                                                    {faqSt?.status === "done" && (
+                                                      <p className="text-[10px] text-emerald-600 flex items-center gap-1 justify-center font-medium">
+                                                        <CheckCircle2 size={10} /> {faqSt.message}
+                                                      </p>
+                                                    )}
+                                                    {faqSt?.status === "error" && (
+                                                      <p className="text-[10px] text-red-500 flex items-center gap-1 justify-center">
+                                                        <AlertTriangle size={9} /> {faqSt.message}
+                                                      </p>
+                                                    )}
+                                                  </div>
+                                                )}
                                               </div>
-                                            ))}
+                                              );
+                                            })}
                                           </div>
                                         )}
 

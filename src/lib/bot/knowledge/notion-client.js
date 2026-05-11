@@ -213,6 +213,28 @@ export function getPageTags(page) {
 }
 
 /**
+ * FAQ2 データベースに新しい FAQ ページを作成する。
+ * @param {string} databaseId  NOTION_FAQ2_DATABASE_ID
+ * @param {{ category: string, question: string, answer: string, memo?: string }} fields
+ * @returns {Promise<{ id: string, url: string }>}
+ */
+export async function createFaqPage(databaseId, { category, question, answer, memo = "" }) {
+  const toRichText = (text) => [{ type: "text", text: { content: text.slice(0, 2000) } }];
+  const properties = {
+    Category: { title: toRichText(category || question.slice(0, 100)) },
+    Question: { rich_text: toRichText(question) },
+    Answer:   { rich_text: toRichText(answer) },
+  };
+  if (memo) properties["メモ"] = { rich_text: toRichText(memo) };
+
+  const res = await notionFetch("/pages", {
+    method: "POST",
+    body: JSON.stringify({ parent: { database_id: databaseId }, properties })
+  });
+  return { id: res.id, url: res.url ?? null };
+}
+
+/**
  * ページの URL を取得する。
  * 「関連リンク」→「URL」→「url」の順で探す。
  */

@@ -68,15 +68,17 @@ export default function PoliciesPage() {
   const [loadingEditId, setLoadingEditId] = useState<string | null>(null);
 
   // URL params
-  const [fromSandbox, setFromSandbox] = useState(false);
-  const [rootCause,   setRootCause]   = useState<RootCause | "">("");
-  const [actionType,  setActionType]  = useState<PolicyActionType | "">("");
+  const [fromSandbox,   setFromSandbox]   = useState(false);
+  const [rootCause,     setRootCause]     = useState<RootCause | "">("");
+  const [actionType,    setActionType]    = useState<PolicyActionType | "">("");
+  const [actionContent, setActionContent] = useState("");
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     setFromSandbox(p.get("from") === "sandbox");
     setRootCause((p.get("root_cause") ?? "") as RootCause | "");
     setActionType((p.get("action_type") ?? "") as PolicyActionType | "");
+    setActionContent(p.get("action_content") ?? "");
   }, []);
 
   useEffect(() => {
@@ -168,6 +170,32 @@ export default function PoliciesPage() {
               <p className="text-xs text-amber-700 leading-relaxed">{guide.desc}</p>
             </div>
           </div>
+
+          {actionContent && (
+            <div className="bg-white rounded-md border border-amber-200 p-3 space-y-1">
+              <p className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">Sandbox が提案した修正内容</p>
+              <p className="text-xs text-zinc-600 leading-relaxed whitespace-pre-wrap">{actionContent}</p>
+            </div>
+          )}
+
+          <div className="bg-white rounded-md border border-amber-200 p-3 space-y-2">
+            <p className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">対応手順</p>
+            <ol className="text-xs text-zinc-700 space-y-2 list-none">
+              <li className="flex items-start gap-2">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold flex items-center justify-center mt-0.5">1</span>
+                <span>下のリストから <strong>該当ファイル</strong>（ハイライト表示）の「編集」をクリックして内容を開く</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold flex items-center justify-center mt-0.5">2</span>
+                <span>上の提案内容を参考に Markdown を修正し、<strong>「保存してデプロイ」</strong>をクリックする</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold flex items-center justify-center mt-0.5">3</span>
+                <span>デプロイ完了後、Sandbox で同じシナリオを再実行して改善を確認</span>
+              </li>
+            </ol>
+          </div>
+
           <div className="flex items-center gap-2 flex-wrap">
             {guide.nextPage && (
               <a href={guide.nextPage.href}

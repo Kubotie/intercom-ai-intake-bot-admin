@@ -889,10 +889,11 @@ export default function SandboxPage() {
 
                                   {corrections[turn.turn]?.suggestion && (() => {
                                     const s = corrections[turn.turn].suggestion!;
-                                    const hasFaqAction       = s.actions.some(a => a.type === "add_faq");
-                                    const hasPolicyAction    = s.actions.some(a => a.type === "update_knowledge" || a.type === "adjust_workflow");
-                                    const hasSkillAction     = s.actions.some(a => a.type === "add_skill");
-                                    const hasKnowledgeAction = hasFaqAction;
+                                    const hasFaqAction             = s.actions.some(a => a.type === "add_faq");
+                                    const hasUpdateKnowledgeAction = s.actions.some(a => a.type === "update_knowledge");
+                                    const hasPolicyAction          = s.actions.some(a => a.type === "adjust_workflow");
+                                    const hasSkillAction           = s.actions.some(a => a.type === "add_skill");
+                                    const hasKnowledgeAction       = hasFaqAction || hasUpdateKnowledgeAction;
                                     return (
                                       <div className="space-y-2 pt-1 border-t border-amber-200">
                                         {/* 問題と根本原因 */}
@@ -943,19 +944,25 @@ export default function SandboxPage() {
                                         <div className="pt-1.5 border-t border-amber-200 space-y-1.5">
                                           <p className="text-[10px] font-semibold text-amber-800">③ 次のステップ — 上の内容を反映する</p>
                                           <div className="flex flex-wrap gap-1.5">
-                                            {hasKnowledgeAction && (
-                                              <a
-                                                href={`/knowledge?from=sandbox&root_cause=${encodeURIComponent(s.root_cause)}`}
-                                                className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1.5 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 font-medium transition-colors">
-                                                <Database size={10} /> Knowledge を更新 <ArrowRight size={9} />
-                                              </a>
-                                            )}
-                                            {hasPolicyAction && (() => {
-                                              const policyAction = s.actions.find(a => a.type === "update_knowledge" || a.type === "adjust_workflow");
-                                              const actionType = policyAction?.type ?? "adjust_workflow";
+                                            {hasKnowledgeAction && (() => {
+                                              const kAction = s.actions.find(a => a.type === "add_faq" || a.type === "update_knowledge");
+                                              const p = new URLSearchParams({ from: "sandbox", root_cause: s.root_cause, action_type: kAction?.type ?? "add_faq" });
+                                              if (kAction?.content) p.set("action_content", kAction.content.slice(0, 400));
                                               return (
                                                 <a
-                                                  href={`/policies?from=sandbox&root_cause=${encodeURIComponent(s.root_cause)}&action_type=${encodeURIComponent(actionType)}`}
+                                                  href={`/knowledge?${p.toString()}`}
+                                                  className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1.5 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 font-medium transition-colors">
+                                                  <Database size={10} /> Knowledge を更新 <ArrowRight size={9} />
+                                                </a>
+                                              );
+                                            })()}
+                                            {hasPolicyAction && (() => {
+                                              const pAction = s.actions.find(a => a.type === "adjust_workflow");
+                                              const p = new URLSearchParams({ from: "sandbox", root_cause: s.root_cause, action_type: "adjust_workflow" });
+                                              if (pAction?.content) p.set("action_content", pAction.content.slice(0, 400));
+                                              return (
+                                                <a
+                                                  href={`/policies?${p.toString()}`}
                                                   className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1.5 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 font-medium transition-colors">
                                                   <BookOpen size={10} /> Policies を修正 <ArrowRight size={9} />
                                                 </a>

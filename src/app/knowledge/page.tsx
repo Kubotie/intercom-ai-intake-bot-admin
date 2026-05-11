@@ -6,11 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Table, Thead, Th, Tbody, Tr, Td } from "@/components/ui/table";
 import { formatDate, truncate } from "@/lib/utils";
 import type { KnowledgeChunk, KnowledgeSource } from "@/lib/nocodb";
-import { RefreshCw, ChevronLeft, ChevronRight, BookOpen, Database, Clock, Upload, Search, ChevronDown } from "lucide-react";
+import { RefreshCw, ChevronLeft, ChevronRight, BookOpen, Database, Clock, Upload, Search, ChevronDown, AlertTriangle, ArrowRight, Zap } from "lucide-react";
 
 const SOURCE_TYPES = ["", "notion_faq", "help_center", "known_issue", "notion_cse"];
 
 export default function KnowledgePage() {
+  const [fromSandbox,    setFromSandbox]    = useState(false);
+  const [rootCause,      setRootCause]      = useState("");
+  const [actionType,     setActionType]     = useState("");
+  const [actionContent,  setActionContent]  = useState("");
+
   const [chunks, setChunks]       = useState<KnowledgeChunk[]>([]);
   const [total, setTotal]         = useState(0);
   const [page, setPage]           = useState(0);
@@ -58,6 +63,13 @@ export default function KnowledgePage() {
     setLoading(false);
   };
 
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    setFromSandbox(p.get("from") === "sandbox");
+    setRootCause(p.get("root_cause") ?? "");
+    setActionType(p.get("action_type") ?? "");
+    setActionContent(p.get("action_content") ?? "");
+  }, []);
   useEffect(() => { loadSources(); }, []);
   useEffect(() => { setPage(0); }, [sourceType, pubOnly, searchText]);
   useEffect(() => { load(); }, [page, sourceType, pubOnly, searchText]);
@@ -121,6 +133,60 @@ export default function KnowledgePage() {
           <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> 更新
         </Button>
       </div>
+
+      {/* Sandbox コンテキストバナー */}
+      {fromSandbox && (
+        <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-amber-800">
+                {actionType === "update_knowledge" ? "ナレッジの内容を修正する必要があります"
+                  : actionType === "add_faq" ? "FAQ チャンクの追加が必要です"
+                  : rootCause === "missing_faq" ? "FAQ チャンクの追加が必要です"
+                  : "ナレッジの更新が必要です"}
+              </p>
+              <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
+                Sandbox の改善提案に基づいて、このページで Knowledge を更新してください。
+              </p>
+            </div>
+          </div>
+
+          {actionContent && (
+            <div className="bg-white rounded-md border border-amber-200 p-3 space-y-1.5">
+              <p className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">Sandbox が提案した修正内容</p>
+              <p className="text-xs text-zinc-600 leading-relaxed whitespace-pre-wrap">{actionContent}</p>
+            </div>
+          )}
+
+          <div className="bg-white rounded-md border border-amber-200 p-3 space-y-2">
+            <p className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">対応手順</p>
+            <ol className="text-xs text-zinc-700 space-y-2 list-none">
+              <li className="flex items-start gap-2">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold flex items-center justify-center mt-0.5">1</span>
+                <span>
+                  {actionType === "update_knowledge"
+                    ? <><strong>既存チャンクを修正する場合：</strong>下の検索で対象チャンクを見つけて「編集」し、上の提案内容を反映する</>
+                    : <><strong>Notion FAQ に追加する場合：</strong>Notion の FAQ データベースに Q&amp;A を追加し、上の「Notion FAQ → 今すぐ同期」ボタンで同期してください</>
+                  }
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold flex items-center justify-center mt-0.5">2</span>
+                <span><strong>同期後：</strong>このページで対象のタイトルを検索して、チャンクが追加・更新されていることを確認</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold flex items-center justify-center mt-0.5">3</span>
+                <span>Sandbox で同じシナリオを再実行して改善を確認</span>
+              </li>
+            </ol>
+          </div>
+          <a href="/sandbox"
+            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-50 font-medium transition-colors">
+            <Zap size={12} /> Sandbox に戻る <ArrowRight size={11} />
+          </a>
+        </div>
+      )}
 
       {/* Stats cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">

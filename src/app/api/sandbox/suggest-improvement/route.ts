@@ -100,7 +100,7 @@ ${expectedReply}
 
     const data = await res.json() as { choices: { message: { content: string } }[] };
     const raw  = data.choices?.[0]?.message?.content?.trim() ?? "{}";
-    const cleaned = raw.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
 
     let suggestion: ImprovementSuggestion;
     try {

@@ -32,8 +32,8 @@ function stripHtml(html) {
 // ─── Intercom API ────────────────────────────────────────────────────────────
 
 async function fetchIntercomConversation(conversationId) {
-  const token = process.env.INTERCOM_TOKEN;
-  if (!token) throw new Error("INTERCOM_TOKEN is not set");
+  const token = process.env.INTERCOM_ACCESS_TOKEN;
+  if (!token) throw new Error("INTERCOM_ACCESS_TOKEN is not set");
 
   const res = await fetch(`https://api.intercom.io/conversations/${conversationId}`, {
     headers: {

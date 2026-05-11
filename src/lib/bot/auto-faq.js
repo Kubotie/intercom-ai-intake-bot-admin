@@ -146,10 +146,10 @@ export function extractTagEvent(payload) {
   let tagName = null;
   let conversationId = null;
 
-  if (item.type === "conversation_part") {
-    // conversation_part.tag.created: tag 情報は item.tag
+  if (item.type === "conversation_part_tag" || item.type === "conversation_part") {
+    // conversation_part.tag.created: item.type は "conversation_part_tag"
     tagName = item.tag?.name ?? null;
-    conversationId = item.conversation_id ?? item.conversation?.id ?? null;
+    conversationId = item.conversation?.id ?? item.conversation_id ?? null;
   } else if (item.type === "tag") {
     tagName = item.name ?? null;
     conversationId = item.applied_to?.id ?? null;

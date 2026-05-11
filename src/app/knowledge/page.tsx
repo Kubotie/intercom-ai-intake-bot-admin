@@ -8,7 +8,7 @@ import { formatDate, truncate } from "@/lib/utils";
 import type { KnowledgeChunk, KnowledgeSource } from "@/lib/nocodb";
 import { RefreshCw, ChevronLeft, ChevronRight, BookOpen, Database, Clock, Upload, Search, ChevronDown, AlertTriangle, ArrowRight, Zap } from "lucide-react";
 
-const SOURCE_TYPES = ["", "notion_faq", "help_center", "known_issue", "notion_cse"];
+const SOURCE_TYPES = ["", "notion_faq", "notion_faq2", "help_center"];
 
 export default function KnowledgePage() {
   const [fromSandbox,    setFromSandbox]    = useState(false);
@@ -189,12 +189,11 @@ export default function KnowledgePage() {
       )}
 
       {/* Stats cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-3 gap-3 mb-5">
         {[
-          { label: "Notion FAQ",   type: "notion_faq",  icon: Database, color: "text-purple-600", syncable: true  },
-          { label: "Help Center",  type: "help_center", icon: BookOpen,  color: "text-blue-600",   syncable: true  },
-          { label: "Known Issues", type: "known_issue", icon: Database, color: "text-amber-600",  syncable: false },
-          { label: "CSE Cases",    type: "notion_cse",  icon: Database, color: "text-zinc-500",   syncable: false },
+          { label: "FAQ",                   type: "notion_faq2", icon: Database, color: "text-emerald-600", syncable: true },
+          { label: "トラブルシューティング", type: "notion_faq",  icon: Database, color: "text-purple-600",  syncable: true },
+          { label: "Help Center",           type: "help_center", icon: BookOpen,  color: "text-blue-600",    syncable: true },
         ].map(({ label, type, icon: Icon, color, syncable }) => {
           const src = getSource(type);
           const isSyncing = syncingType === type;

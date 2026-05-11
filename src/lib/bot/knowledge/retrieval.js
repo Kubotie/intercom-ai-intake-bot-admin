@@ -20,7 +20,7 @@ import { searchHelpCenter, fetchArticleBodyFromUrl } from "../skills/help-center
 import { searchChunks } from "./chunks.js";
 import { canExposeKnowledgeToCustomer } from "./policy-gate.js";
 
-const DEFAULT_ALLOWED_SOURCE_TYPES = ["help_center", "notion_faq", "qa_pair", "knowledge_doc"];
+const DEFAULT_ALLOWED_SOURCE_TYPES = ["help_center", "notion_faq", "notion_faq2", "qa_pair", "knowledge_doc"];
 
 /**
  * @typedef {Object} KnowledgeCandidate
@@ -78,6 +78,9 @@ async function fetchBySourceType(sourceType, query, collectedSlots, limit) {
 
     case "notion_faq":
       return fetchFromChunks("notion_faq", query, limit);
+
+    case "notion_faq2":
+      return fetchFromChunks("notion_faq2", query, limit);
 
     case "notion_cse":
       // CSE は顧客返答不可だが retrieval 自体は可能 (policy gate で使い分ける)

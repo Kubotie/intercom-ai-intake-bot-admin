@@ -7,10 +7,10 @@
  * トリガータグ: 環境変数 AUTO_FAQ_TAG_NAME (デフォルト: "FAQ化")
  */
 
-import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { createFaqPage } from "./knowledge/notion-client.js";
 import { syncNotionFaq2 } from "./knowledge/sync-notion-faq2.js";
+import { generateFaqWithPipeline } from "./auto-faq-pipeline.js";
 
 const AUTO_FAQ_TAG = () => (process.env.AUTO_FAQ_TAG_NAME ?? "FAQ化").trim();
 
@@ -198,9 +198,9 @@ export async function processAutoFaq(payload) {
     return { skipped: true, reason: "empty conversation" };
   }
 
-  // 2. LLM で Q/A 生成
-  logger.info("auto-faq: generating FAQ via LLM", { ...ctx, parts_count: parts.length });
-  const faq = await generateFaqFromConversation(parts);
+  // 2. 多段パイプラインで Q/A 生成
+  logger.info("auto-faq: generating FAQ via pipeline", { ...ctx, parts_count: parts.length });
+  const faq = await generateFaqWithPipeline(parts);
   logger.info("auto-faq: FAQ generated", { ...ctx, question: faq.question.slice(0, 80) });
 
   // 3. Notion に作成

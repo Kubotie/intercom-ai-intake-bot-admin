@@ -17,6 +17,7 @@
 import { config } from "../config.js";
 import { loadSkillPrompt } from "../policy-loader.js";
 import { retrieveKnowledgeCandidates, filterExposable, buildQuery } from "../knowledge/retrieval.js";
+import { verifyAnswerPlan } from "../knowledge/verify-answer.js";
 
 export const SKILL_NAME = "faq_answer";
 export const CONFIDENCE_THRESHOLD = 0.65;
@@ -137,12 +138,50 @@ export async function runFaqAnswerSkill({ latestUserMessage, category, collected
     return notHandled(`no faq candidates found | query:${retrievalQuery}`);
   }
 
+  // ── Stage 2 + 3: サブエージェント検証パイプライン ────────────────────────
+  let verification;
+  try {
+    verification = await verifyAnswerPlan({
+      question: latestUserMessage,
+      candidates,
+      collectedSlots: collectedSlots || {},
+    });
+  } catch {
+    // 検証失敗は非致命的: 既存フローにフォールバック
+    verification = { action: "ANSWER", best_chunk_index: null, clarifying_question: null };
+  }
+
+  if (verification.action === "ESCALATE") {
+    return notHandled(`verify: no confident answer | ${verification.plan?.reason ?? ""}`);
+  }
+
+  if (verification.action === "CLARIFY" && verification.clarifying_question) {
+    return {
+      handled: true,
+      answer_type: "clarify",
+      answer_message: verification.clarifying_question,
+      confidence: 0.5,
+      sources: [],
+      reason: "clarification_needed",
+      should_escalate: false,
+      next_action: "ask"
+    };
+  }
+
+  // ANSWER: best_chunk_index があれば先頭に並べ替えて精度を上げる
+  if (verification.best_chunk_index != null && verification.best_chunk_index < candidates.length) {
+    const best = candidates[verification.best_chunk_index];
+    const rest = candidates.filter((_, i) => i !== verification.best_chunk_index);
+    candidates = [best, ...rest];
+  }
+
   // candidate の観測情報を作成 (rejected でも候補が分かるようにする)
   const candidateSummary = {
     retrieval_query: retrievalQuery,
     candidate_count: candidates.length,
     candidate_chunk_ids: candidates.map((c) => c.chunk_id),
-    candidate_titles: candidates.map((c) => c.title)
+    candidate_titles: candidates.map((c) => c.title),
+    verify_action: verification.action,
   };
   const candidateJson = JSON.stringify(candidateSummary);
 

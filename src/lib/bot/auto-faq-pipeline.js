@@ -23,6 +23,18 @@ import { logger } from "./logger.js";
 
 const MAX_REFINEMENT_ROUNDS = 2;
 
+// ─── Ptengine ドメイン知識（誤情報防止・用語平易化） ────────────────────────
+// Stage2/4 のプロンプトに注入して LLM の誤解を防ぐ。
+const PTENGINE_DOMAIN_FACTS = `
+【Ptengine 固有仕様（必ず守ること）】
+1. HTML編集機能はJavaScriptタグによるDOM書き換えであり、元のWebページファイルは一切変更されない。
+   → 「バックアップを取ってください」は誤り。変更はPtengine管理画面からいつでも停止・削除できる。
+2. 「初期化スクリプト」「init script」などの技術用語は必ず平易な言葉で言い換える。
+   → 例：「スライダーを動かすために必要な専用のJavaScriptコード（スライダーツールが提供するもの）」
+3. 体験（Experience）の編集・配信はPtengineの管理画面上で完結し、サイト本体のコードには手を加えない。
+4. HTML編集の変更は「体験を停止する」だけで即座に元に戻る。
+`.trim();
+
 // ─── LLM 共通 ────────────────────────────────────────────────────────────────
 
 async function llmJson(systemPrompt, userContent, temperature = 0) {
@@ -140,13 +152,17 @@ async function draftFaq(transcript, analysis) {
   "answer": "解決方法の詳細回答"
 }
 
+${PTENGINE_DOMAIN_FACTS}
+
 answer の書き方ルール:
 1. 「原因 → 解決策」の対応形式で記述する
    例: 「〜の場合は〜してください。〜の場合は〜が必要です。」
 2. 「〜ですか？」「〜を教えてください」などユーザーへの質問は一切含めない
 3. 全ての root_causes と solution_per_cause を網羅する
 4. ボットが参照して直接ユーザーに回答できる文体にする（断定・指示形）
-5. 番号付きリストまたは条件分岐で分かりやすく構造化する`;
+5. 番号付きリストまたは条件分岐で分かりやすく構造化する
+6. 技術用語（初期化スクリプト・DOM・CSP 等）は必ず括弧内または直後に平易な言い換えを添える
+   例：「初期化スクリプト（スライダーを動かすために必要な専用のJavaScriptコード）」`;
 
   return llmJson(
     system,
@@ -176,21 +192,29 @@ async function verifyFaqCompleteness(analysis, draft) {
   "is_complete": true または false,
   "missing_points": ["answer に含まれていない解決策・重要情報1", ...],
   "contains_diagnostic_questions": true または false,
+  "contains_factual_errors": true または false,
+  "factual_error_details": ["誤情報の内容1", ...],
+  "has_unexplained_jargon": true または false,
   "over_generalized": true または false,
   "feedback": "改善すべき点の具体的な指摘"
 }
 
+${PTENGINE_DOMAIN_FACTS}
+
 検証項目:
 1. 全ての root_causes に対応する解決策が answer に含まれているか
 2. answer にユーザーへの診断質問（「〜ですか？」「〜を教えてください」等）が混入していないか
-   → 含まれていれば contains_diagnostic_questions=true
 3. 解決策が具体的か（一般論ではなく手順として記述されているか）
+4. Ptengine固有仕様に反する誤情報が含まれていないか
+   → 「バックアップを取ってください」「実際のページに影響します」等 → contains_factual_errors=true
+5. 技術用語（初期化スクリプト・DOM・CSP 等）に平易な言い換えが添えられているか
+   → 専門用語のみで説明されていれば has_unexplained_jargon=true
 
 品質スコア基準:
-- 1.0: 全解決策が具体的に記述され、診断質問なし
-- 0.8: 主要解決策は含まれているが一部の詳細が不足
-- 0.6: 重要な解決策が省略、または診断質問が混入している
-- 0.4以下: 大幅な情報損失・診断質問の多用・過剰な一般化`;
+- 1.0: 全解決策が具体的・正確。診断質問なし。技術用語に説明あり
+- 0.8: 主要解決策は正確だが一部の詳細が不足
+- 0.6: 診断質問の混入・技術用語の未説明・軽微な誤情報のいずれかがある
+- 0.4以下: 誤情報・大幅な情報損失・診断質問の多用のいずれかがある`;
 
   const requiredPoints = [
     ...(analysis.root_causes ?? []),
@@ -234,9 +258,14 @@ async function refineFaq(draft, verification, analysis) {
   "answer": "改善された回答"
 }
 
+${PTENGINE_DOMAIN_FACTS}
+
 改善ルール:
 - missing_points の内容を answer に追加する
 - contains_diagnostic_questions=true の場合、「〜ですか？」「〜を教えてください」等の質問文を全て削除し、解決策の記述に置き換える
+- contains_factual_errors=true の場合、factual_error_details の誤情報を正しい情報に置き換える（Ptengine仕様を厳守）
+- has_unexplained_jargon=true の場合、技術用語の直後に括弧で平易な説明を添える
+  例：「初期化スクリプト（スライダーを動かすために必要な専用のJavaScriptコード）」
 - 「原因 → 解決策」の対応形式を維持する
 - ユーザーへの質問は一切含めない`;
 
@@ -249,6 +278,8 @@ async function refineFaq(draft, verification, analysis) {
 - 品質スコア: ${verification.quality_score}
 - 欠落ポイント: ${(verification.missing_points ?? []).join(" / ") || "なし"}
 - 診断質問の混入: ${verification.contains_diagnostic_questions ? "あり（削除すること）" : "なし"}
+- 誤情報: ${verification.contains_factual_errors ? (verification.factual_error_details ?? []).join(" / ") : "なし"}
+- 技術用語の未説明: ${verification.has_unexplained_jargon ? "あり（括弧で平易な説明を添えること）" : "なし"}
 - 過剰一般化: ${verification.over_generalized ? "あり" : "なし"}
 - 改善指示: ${verification.feedback}
 
@@ -300,13 +331,17 @@ export async function generateFaqWithPipeline(conversationParts) {
       quality_score: verification.quality_score,
       is_complete: verification.is_complete,
       contains_diagnostic_questions: verification.contains_diagnostic_questions,
+      contains_factual_errors: verification.contains_factual_errors,
+      has_unexplained_jargon: verification.has_unexplained_jargon,
       missing_count: verification.missing_points?.length ?? 0,
     });
 
     const passesQuality = verification.is_complete
       && verification.quality_score >= 0.8
       && !verification.over_generalized
-      && !verification.contains_diagnostic_questions;
+      && !verification.contains_diagnostic_questions
+      && !verification.contains_factual_errors
+      && !verification.has_unexplained_jargon;
 
     if (passesQuality) {
       logger.info("auto-faq-pipeline: quality OK, pipeline complete");

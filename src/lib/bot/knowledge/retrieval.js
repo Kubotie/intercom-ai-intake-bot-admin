@@ -80,7 +80,8 @@ async function fetchBySourceType(sourceType, query, collectedSlots, limit) {
       return fetchFromChunks("notion_faq", query, limit);
 
     case "notion_faq2":
-      return fetchFromChunks("notion_faq2", query, limit);
+      // FAQ化済みエントリは人手で確認済みのため confidence を +0.1 ブースト
+      return fetchFromChunks("notion_faq2", query, limit, 0.1);
 
     case "notion_cse":
       // CSE は顧客返答不可だが retrieval 自体は可能 (policy gate で使い分ける)
@@ -135,7 +136,7 @@ async function fetchFromHelpCenter(query, limit) {
  * searchChunks のキーワードスコア順を confidence_hint に反映する。
  * (freshness_score * 0.6 は同順位チャンク間でしか有効でなかったため廃止)
  */
-async function fetchFromChunks(sourceType, query, limit) {
+async function fetchFromChunks(sourceType, query, limit, confidenceBoost = 0) {
   try {
     const chunks = await searchChunks({ sourceTypes: [sourceType], query, limit });
     return chunks.map((c, idx) => ({
@@ -145,8 +146,8 @@ async function fetchFromChunks(sourceType, query, limit) {
       title: c.title,
       body: c.body,
       url: c.url,
-      // キーワード一致順を保持: rank1=1.0, rank2=0.85, rank3=0.70 ...
-      confidence_hint: Math.max(1.0 - idx * 0.15, 0.1),
+      // キーワード一致順を保持: rank1=1.0, rank2=0.85 ... + ソース種別ブースト
+      confidence_hint: Math.max(1.0 - idx * 0.15, 0.1) + confidenceBoost,
       reason: `chunk_search:${sourceType}`,
       published_to_bot: c.published_to_bot
     }));

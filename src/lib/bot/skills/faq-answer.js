@@ -23,6 +23,10 @@ export const CONFIDENCE_THRESHOLD = 0.65;
 
 const SUPPORTED_CATEGORIES = new Set([
   "usage_guidance",
+  "ab_test_experience",
+  "heatmap_analytics",
+  "popup_event",
+  "customization_integration",
   "experience_issue",
   "login_account",
   "billing_contract",
@@ -98,7 +102,7 @@ export async function runFaqAnswerSkill({ latestUserMessage, category, collected
             category,
             latestUserMessage: q,
             collectedSlots: collectedSlots || {},
-            allowedSourceTypes: ["notion_faq", "qa_pair", "knowledge_doc"],
+            allowedSourceTypes: ["notion_faq", "notion_faq2", "qa_pair", "knowledge_doc"],
             limit: 3
           }).catch(() => [])
         )
@@ -120,7 +124,7 @@ export async function runFaqAnswerSkill({ latestUserMessage, category, collected
         category,
         latestUserMessage,
         collectedSlots: collectedSlots || {},
-        allowedSourceTypes: ["notion_faq", "qa_pair", "knowledge_doc"],
+        allowedSourceTypes: ["notion_faq", "notion_faq2", "qa_pair", "knowledge_doc"],
         limit: 5
       });
       candidates = filterExposable(all);

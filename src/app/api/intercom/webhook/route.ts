@@ -1,4 +1,4 @@
-import { type NextRequest } from "next/server";
+import { type NextRequest, after } from "next/server";
 import { logRawPayload, logger } from "@/lib/bot/logger.js";
 import { processIntercomWebhook } from "@/lib/bot/processor.js";
 import { initDynamicSkills } from "@/lib/bot/skills/registry.js";
@@ -32,18 +32,21 @@ export async function POST(request: NextRequest) {
 
   // ── タグ付け → 自動 FAQ 化 ───────────────────────────────────────────────
   if (topic === "conversation_part.tag.created") {
-    processAutoFaq(payload).then((result) => {
-      if (result.skipped) {
-        logger.info("auto-faq: skipped", { reason: result.reason });
-      } else {
-        logger.info("auto-faq: completed", {
-          notion_page_id: result.notion_page_id,
-          sync_stats: result.sync_stats,
-        });
-      }
-    }).catch((err: Error) => {
-      logger.warn("auto-faq: failed", { error: err?.message });
-    });
+    // after() でレスポンス返却後も処理を継続（Vercel serverless 対応）
+    after(
+      processAutoFaq(payload).then((result) => {
+        if (result.skipped) {
+          logger.info("auto-faq: skipped", { reason: result.reason });
+        } else {
+          logger.info("auto-faq: completed", {
+            notion_page_id: result.notion_page_id,
+            sync_stats: result.sync_stats,
+          });
+        }
+      }).catch((err: Error) => {
+        logger.warn("auto-faq: failed", { error: err?.message });
+      })
+    );
     return new Response("ok", { status: 200 });
   }
 

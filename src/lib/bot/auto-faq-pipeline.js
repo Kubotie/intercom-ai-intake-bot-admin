@@ -323,6 +323,27 @@ export async function generateFaqWithPipeline(conversationParts) {
 
   // Stage 3 + 4 ループ
   for (let round = 0; round < MAX_REFINEMENT_ROUNDS; round++) {
+    // 空フィールドは即Stage4へ（質問・回答が空ならStage3をスキップして強制精製）
+    const isEmpty = !draft.question?.trim() || !draft.answer?.trim();
+    if (isEmpty) {
+      logger.warn(`auto-faq-pipeline: Stage2/4 returned empty question or answer (round ${round + 1}), forcing Stage4`);
+      const syntheticVerification = {
+        quality_score: 0,
+        is_complete: false,
+        missing_points: ["question または answer が空です"],
+        contains_diagnostic_questions: false,
+        contains_factual_errors: false,
+        has_unexplained_jargon: false,
+        over_generalized: false,
+        feedback: "question または answer フィールドが空文字のため再生成が必要です",
+      };
+      pipelineLog.verifications.push(syntheticVerification);
+      draft = await refineFaq(draft, syntheticVerification, analysis);
+      pipelineLog.drafts.push(draft);
+      logger.info("auto-faq-pipeline: Stage4 complete (empty recovery)", { question: draft.question?.slice(0, 60) });
+      continue;
+    }
+
     logger.info(`auto-faq-pipeline: Stage3 verifying (round ${round + 1})`);
     const verification = await verifyFaqCompleteness(analysis, draft);
     pipelineLog.verifications.push(verification);
@@ -355,10 +376,17 @@ export async function generateFaqWithPipeline(conversationParts) {
     logger.info("auto-faq-pipeline: Stage4 complete", { question: draft.question?.slice(0, 60) });
   }
 
+  const finalQuestion = String(draft.question ?? "").trim();
+  const finalAnswer   = String(draft.answer   ?? "").trim();
+
+  if (!finalQuestion || !finalAnswer) {
+    throw new Error(`pipeline produced empty ${!finalQuestion ? "question" : "answer"} after all stages`);
+  }
+
   return {
     category: String(draft.category ?? analysis.category_hint ?? "サポートFAQ"),
-    question: String(draft.question ?? ""),
-    answer:   String(draft.answer   ?? ""),
+    question: finalQuestion,
+    answer:   finalAnswer,
     pipeline_log: pipelineLog,
   };
 }

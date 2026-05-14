@@ -203,6 +203,11 @@ export async function processAutoFaq(payload) {
   const faq = await generateFaqWithPipeline(parts);
   logger.info("auto-faq: FAQ generated", { ...ctx, question: faq.question.slice(0, 80) });
 
+  if (!faq.question || !faq.answer) {
+    logger.warn("auto-faq: pipeline returned empty question or answer, skipping Notion creation", ctx);
+    return { skipped: true, reason: "empty FAQ: question or answer is blank" };
+  }
+
   // 3. Notion に作成
   const databaseId = process.env.NOTION_FAQ2_DATABASE_ID;
   if (!databaseId) throw new Error("NOTION_FAQ2_DATABASE_ID is not set");

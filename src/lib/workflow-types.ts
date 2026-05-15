@@ -35,15 +35,45 @@ export const INTENT_META: Record<string, IntentMeta> = {
     skillDescriptions: ["（未実装）担当者に直接引き継ぎ"],
     color: "sky",
   },
-  experience_issue: {
-    label: "体験・表示・配信問題",
-    desc: "体験/ポップアップ/A-Bテスト の表示不具合・配信停止",
-    representativeUtterances: ["ABテストが反映されない", "ポップアップが表示されない", "0インプレッション"],
+  ab_test_experience: {
+    label: "ABテスト・体験設定問題",
+    desc: "体験の公開・表示・配信・UU数差異・リダイレクトテスト",
+    representativeUtterances: ["ABテストが反映されない", "体験が表示されない", "UU数がおかしい"],
     priority: 3,
     knowledgeFirst: true,
-    skills: ["faq_answer", "help_center_answer"],
-    skillDescriptions: ["Notion FAQ（最優先）", "Help Center（FAQ fallback）"],
+    skills: ["faq_answer", "help_center_answer", "known_bug_match"],
+    skillDescriptions: ["Notion FAQ（最優先）", "Help Center", "既知バグ照合"],
     color: "purple",
+  },
+  heatmap_analytics: {
+    label: "ヒートマップ・解析問題",
+    desc: "スマートヒートマップの表示・クリック数・スマートサマリー",
+    representativeUtterances: ["ヒートマップが表示されない", "クリック数が取得できない", "旧ヒートマップについて"],
+    priority: 4,
+    knowledgeFirst: true,
+    skills: ["help_center_answer", "faq_answer", "known_bug_match"],
+    skillDescriptions: ["Help Center（最優先）", "Notion FAQ", "既知バグ照合"],
+    color: "purple",
+  },
+  popup_event: {
+    label: "ポップアップ・イベント計測問題",
+    desc: "ポップアップ/WEB接客/離脱防止/イベントトリガーの設定・動作",
+    representativeUtterances: ["ポップアップが表示されない", "離脱防止が起動しない", "イベント計測の設定方法"],
+    priority: 5,
+    knowledgeFirst: true,
+    skills: ["faq_answer", "help_center_answer"],
+    skillDescriptions: ["Notion FAQ（最優先）", "Help Center"],
+    color: "purple",
+  },
+  customization_integration: {
+    label: "カスタマイズ・他ツール連携",
+    desc: "カスタムHTML/CSS/JS・他社ツール連携・Shopify/WordPress特有設定",
+    representativeUtterances: ["HTMLを編集したらJSが動かない", "他社LPOツールとの競合", "スライダーの初期化スクリプト"],
+    priority: 6,
+    knowledgeFirst: true,
+    skills: ["help_center_answer", "faq_answer"],
+    skillDescriptions: ["Help Center（最優先）", "Notion FAQ"],
+    color: "info",
   },
   tracking_issue: {
     label: "計測・トラッキング問題",
@@ -110,6 +140,7 @@ export type ConciergeNodeData = {
   policySetKey: string | null;
   skillProfileKey: string | null;
   sourcePriorityProfileKey: string | null;
+  replyMode: "reply" | "note" | null;
   isMain: boolean;
   isActive: boolean;
   isTestOnly: boolean;

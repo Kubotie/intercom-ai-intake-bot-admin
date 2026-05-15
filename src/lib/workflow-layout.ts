@@ -143,6 +143,7 @@ export function buildInitialLayout(
         policySetKey:              c.policy_set_key ?? null,
         skillProfileKey:           c.skill_profile_key ?? null,
         sourcePriorityProfileKey:  c.source_priority_profile_key ?? null,
+        replyMode:                 c.reply_mode ?? null,
         isMain:                    c.is_main ?? false,
         isActive:                  c.is_active ?? true,
         isTestOnly:                c.is_test_only ?? false,

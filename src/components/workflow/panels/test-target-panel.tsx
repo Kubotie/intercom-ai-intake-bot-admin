@@ -2,17 +2,19 @@
 import { useState, useEffect } from "react";
 import type { TestTargetNodeData } from "@/lib/workflow-types";
 import { TARGET_TYPE_COLORS } from "@/lib/workflow-types";
+import type { Concierge } from "@/lib/nocodb";
 
 interface Props {
   data: TestTargetNodeData;
   conciergeKeys: string[];
+  concierges?: Concierge[];
   onClose: () => void;
   onSaved: () => void;
 }
 
 const TARGET_TYPES = ["contact", "conversation", "email", "domain", "company", "plan"];
 
-export function TestTargetPanel({ data, conciergeKeys, onClose, onSaved }: Props) {
+export function TestTargetPanel({ data, conciergeKeys, concierges, onClose, onSaved }: Props) {
   const [targetType,   setTargetType]   = useState(data.targetType);
   const [targetValue,  setTargetValue]  = useState(data.targetValue);
   const [label,        setLabel]        = useState(data.label ?? "");
@@ -110,9 +112,13 @@ export function TestTargetPanel({ data, conciergeKeys, onClose, onSaved }: Props
           className="w-full text-xs border border-zinc-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
         >
           <option value="">（main を使用）</option>
-          {conciergeKeys.map((k) => (
-            <option key={k} value={k}>{k}</option>
-          ))}
+          {conciergeKeys.map((k) => {
+            const c = concierges?.find((c) => c.concierge_key === k);
+            const label = c
+              ? `${c.display_name}${c.reply_mode === "note" ? " 📝" : ""}${c.is_test_only ? " [test]" : ""}`
+              : k;
+            return <option key={k} value={k}>{label}</option>;
+          })}
         </select>
       </div>
 

@@ -13,10 +13,10 @@ type ProfileCatalog = {
 // Skill profile → visual order string per category
 const SKILL_PROFILE_ORDERS: Record<string, Record<string, string[]>> = {
   default:              {},
-  faq_first:            { usage_guidance: ["faq_answer", "help_center_answer"], experience_issue: ["faq_answer", "help_center_answer"] },
-  help_center_first:    { usage_guidance: ["help_center_answer", "faq_answer"], experience_issue: ["help_center_answer", "faq_answer"] },
-  known_bug_first:      { bug_report: ["known_bug_match", "faq_answer"], experience_issue: ["known_bug_match", "faq_answer", "help_center_answer"] },
-  experience_specialist:{ experience_issue: ["faq_answer", "help_center_answer", "known_bug_match"], usage_guidance: ["faq_answer", "help_center_answer"] },
+  faq_first:            { usage_guidance: ["faq_answer", "help_center_answer"], ab_test_experience: ["faq_answer", "help_center_answer"], popup_event: ["faq_answer", "help_center_answer"] },
+  help_center_first:    { usage_guidance: ["help_center_answer", "faq_answer"], ab_test_experience: ["help_center_answer", "faq_answer"], heatmap_analytics: ["help_center_answer", "faq_answer"], popup_event: ["help_center_answer", "faq_answer"], customization_integration: ["help_center_answer", "faq_answer"] },
+  known_bug_first:      { bug_report: ["known_bug_match", "faq_answer"], ab_test_experience: ["known_bug_match", "faq_answer", "help_center_answer"], heatmap_analytics: ["known_bug_match", "faq_answer", "help_center_answer"] },
+  experience_specialist:{ ab_test_experience: ["faq_answer", "help_center_answer", "known_bug_match"], heatmap_analytics: ["faq_answer", "help_center_answer", "known_bug_match"], popup_event: ["faq_answer", "help_center_answer"], usage_guidance: ["faq_answer", "help_center_answer"] },
 };
 
 const SOURCE_ALLOWED: Record<string, string[]> = {
@@ -95,7 +95,14 @@ export function ConciergePanel({ data, onClose, onSaved }: Props) {
         <div>
           <h3 className="font-semibold text-zinc-900">{data.displayName}</h3>
           <p className="text-[11px] text-zinc-500 mt-0.5">{data.conciergeKey}</p>
-          {data.isMain && <span className="text-[10px] bg-blue-100 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded font-semibold">main</span>}
+          <div className="flex flex-wrap gap-1 mt-1">
+            {data.isMain && <span className="text-[10px] bg-blue-100 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded font-semibold">main</span>}
+            {data.replyMode === "note"
+              ? <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-semibold">📝 メモモード</span>
+              : <span className="text-[10px] bg-zinc-100 text-zinc-500 border border-zinc-200 px-1.5 py-0.5 rounded">💬 直接返信</span>
+            }
+          </div>
+          <p className="text-[10px] text-zinc-400 mt-1">返信モードの変更は <a href="/concierges" className="underline text-blue-500" target="_blank" rel="noreferrer">Concierges ページ</a> から。</p>
         </div>
         <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600 text-lg leading-none">×</button>
       </div>

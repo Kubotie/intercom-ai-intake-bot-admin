@@ -1,6 +1,7 @@
 "use client";
 import type { WorkflowNode } from "@/lib/workflow-types";
 import type { ConciergeNodeData, TestTargetNodeData, IntentNodeData, HandoffCheckNodeData, SkillNodeData, TerminalNodeData } from "@/lib/workflow-types";
+import type { Concierge } from "@/lib/nocodb";
 import type { WorkflowEditorConfig, HandoffPreset } from "@/lib/workflow-editor-types";
 import { ConciergePanel }    from "./concierge-panel";
 import { TestTargetPanel }   from "./test-target-panel";
@@ -13,6 +14,7 @@ import { TerminalPanel }     from "./terminal-panel";
 interface Props {
   node: WorkflowNode | null;
   conciergeKeys: string[];
+  concierges?: Concierge[];
   onClose: () => void;
   onSaved: () => void;
   onSaveIntentDesc?: (nodeId: string, naturalLanguageDesc: string) => void;
@@ -25,7 +27,7 @@ interface Props {
 }
 
 export function PropertiesPanel({
-  node, conciergeKeys, onClose, onSaved,
+  node, conciergeKeys, concierges, onClose, onSaved,
   onSaveIntentDesc, onSaveIntentNLInstruction, onSaveIntentClassifyConfig, editorConfig,
   onSkillThresholdChange, onHandoffPresetChange, onOpenPolicyEditor,
 }: Props) {
@@ -57,6 +59,7 @@ export function PropertiesPanel({
         <TestTargetPanel
           data={node.data as TestTargetNodeData}
           conciergeKeys={conciergeKeys}
+          concierges={concierges}
           onClose={onClose}
           onSaved={onSaved}
         />

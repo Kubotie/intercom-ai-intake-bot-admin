@@ -602,6 +602,7 @@ function Canvas({ concierges, testTargets, workflows, initialWorkflowKey }: Prop
         <PropertiesPanel
           node={selectedNode}
           conciergeKeys={conciergeKeys}
+          concierges={concierges}
           onClose={() => setSelectedNode(null)}
           onSaved={handleSaved}
           onSaveIntentDesc={handleIntentDescSave}

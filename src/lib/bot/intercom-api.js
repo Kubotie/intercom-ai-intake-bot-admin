@@ -31,6 +31,19 @@ export async function replyToConversation(conversationId, messageBody, adminId) 
   });
 }
 
+export async function addNoteToConversation(conversationId, messageBody, adminId) {
+  const noteBody = `🤖 AI回答案（参考）:<br><br>${messageBody}`;
+  return icFetch(`/conversations/${conversationId}/reply`, {
+    method: "POST",
+    body: JSON.stringify({
+      type: "admin",
+      admin_id: adminId || config.intercom.adminId,
+      body: noteBody,
+      message_type: "note"
+    })
+  });
+}
+
 export async function updateContactAttributes(contactId, customAttributes) {
   return icFetch(`/contacts/${contactId}`, {
     method: "PUT",

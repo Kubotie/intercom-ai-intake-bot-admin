@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
     policy_set_key:              body.policy_set_key ?? null,
     skill_profile_key:           body.skill_profile_key ?? null,
     source_priority_profile_key: body.source_priority_profile_key ?? null,
+    reply_mode:                  body.reply_mode ?? "reply",
     is_active:                   body.is_active ?? true,
     is_main:                     body.is_main ?? false,
     is_test_only:                body.is_test_only ?? false,

@@ -14,6 +14,7 @@ const EMPTY_FORM = {
   policy_set_key: "",
   skill_profile_key: "",
   source_priority_profile_key: "",
+  reply_mode: "reply" as "reply" | "note",
   notes: "",
   is_test_only: false,
   is_main: false,
@@ -30,6 +31,7 @@ function conciergeToForm(c: Concierge): FormState {
     policy_set_key:              c.policy_set_key ?? "",
     skill_profile_key:           c.skill_profile_key ?? "",
     source_priority_profile_key: c.source_priority_profile_key ?? "",
+    reply_mode:                  (c.reply_mode === "note" ? "note" : "reply") as "reply" | "note",
     notes:                       c.notes ?? "",
     is_test_only:                c.is_test_only ?? false,
     is_main:                     c.is_main ?? false,
@@ -98,6 +100,21 @@ function ConciergeForm({
           <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">Source Priority Key</label>
           <input value={f.source_priority_profile_key} onChange={e => set({ source_priority_profile_key: e.target.value })}
             placeholder="例: default" className={monoInput} />
+        </div>
+      </div>
+      <div>
+        <label className="text-xs font-medium text-[var(--text-muted)] block mb-1">返信モード</label>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)] cursor-pointer">
+            <input type="radio" name="reply_mode" value="reply" checked={f.reply_mode === "reply"}
+              onChange={() => set({ reply_mode: "reply" })} />
+            <span>直接返信 <span className="text-[11px] text-[var(--text-muted)]">（顧客に送信）</span></span>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)] cursor-pointer">
+            <input type="radio" name="reply_mode" value="note" checked={f.reply_mode === "note"}
+              onChange={() => set({ reply_mode: "note" })} />
+            <span>メモとして残す <span className="text-[11px] text-[var(--text-muted)]">（内部ノート・顧客非表示）</span></span>
+          </label>
         </div>
       </div>
       <div>
@@ -310,7 +327,7 @@ export default function ConciergePage() {
                               {c.persona_label ? `[${c.persona_label}]` : ""}{c.description ? ` ${c.description}` : ""}
                               {!c.persona_label && !c.description && "説明未設定"}
                             </p>
-                            <div className="grid grid-cols-4 gap-3 text-xs">
+                            <div className="grid grid-cols-5 gap-3 text-xs">
                               <div>
                                 <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Intercom Admin ID</p>
                                 <p className="text-[var(--text-secondary)] font-mono text-[10px]">{c.intercom_admin_id || "—"}</p>
@@ -326,6 +343,12 @@ export default function ConciergePage() {
                               <div>
                                 <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Source Priority</p>
                                 <p className="text-[var(--text-secondary)] font-mono text-[10px]">{c.source_priority_profile_key || "—"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">返信モード</p>
+                                <p className="text-[var(--text-secondary)] text-[10px]">
+                                  {c.reply_mode === "note" ? "📝 メモ" : "💬 直接返信"}
+                                </p>
                               </div>
                             </div>
                           </>

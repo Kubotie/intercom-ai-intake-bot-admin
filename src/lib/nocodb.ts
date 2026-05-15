@@ -150,6 +150,7 @@ export type Concierge = {
   policy_set_key: string | null;
   skill_profile_key: string | null;
   source_priority_profile_key: string | null;
+  reply_mode: "reply" | "note" | null;
   is_active: boolean;
   is_main: boolean;
   is_test_only: boolean;

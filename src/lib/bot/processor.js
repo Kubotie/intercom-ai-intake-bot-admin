@@ -12,7 +12,7 @@ import {
 } from "./nocodb-repo.js";
 import { logger } from "./logger.js";
 import { config } from "./config.js";
-import { replyToConversation } from "./intercom-api.js";
+import { replyToConversation, addNoteToConversation } from "./intercom-api.js";
 import { classifyCategory, extractSlots, generateNextQuestion } from "./llm.js";
 import { CATEGORY_LIST, REQUIRED_SLOTS_BY_CATEGORY, SLOT_PRIORITY_BY_CATEGORY } from "./categories.js";
 import { resolveReplyMessage } from "./reply-resolver.js";
@@ -36,7 +36,7 @@ const FALLBACK_CATEGORY = "usage_guidance";
 
 // knowledge-first intents: handoff より前に FAQ / Help Center skill を試す
 // これらは情報収集よりも「答えを出す」ことが優先される intent
-const KNOWLEDGE_FIRST_CATEGORIES = new Set(["usage_guidance", "experience_issue"]);
+const KNOWLEDGE_FIRST_CATEGORIES = new Set(["usage_guidance", "ab_test_experience", "heatmap_analytics", "popup_event", "customization_integration"]);
 
 // エスカレーション判定キーワード (簡易ルール)
 // 「解約」は billing_contract での structured handoff で対応するため除外。
@@ -971,7 +971,7 @@ export async function processIntercomWebhook(payload) {
     } else {
       // 次質問生成 (skill 不採用またはカテゴリに skill なし)
       try {
-        const isFirstContact = messageOrder === 1 && ["experience_issue", "bug_report"].includes(session.category);
+        const isFirstContact = messageOrder === 1 && ["ab_test_experience", "heatmap_analytics", "popup_event", "bug_report"].includes(session.category);
         const { candidateData } = await runNextQuestionGeneration(
           sessionUid, session, event.latest_user_message, shouldEscalate, allSlots, ctx, intentOverride,
           event.author_name || null, isFirstContact
@@ -1208,15 +1208,21 @@ export async function processIntercomWebhook(payload) {
 
   const conciergeAdminId = targeting.concierge?.intercom_admin_id ?? null;
   const replyAdminId = conciergeAdminId || config.intercom.adminId;
+  const replyMode = targeting.concierge?.reply_mode ?? "reply";
   logger.info("reply admin resolved", {
     concierge_intercom_admin_id: conciergeAdminId,
     env_admin_id: config.intercom.adminId,
     using_admin_id: replyAdminId,
+    reply_mode: replyMode,
     ...ctx
   });
   try {
-    await replyToConversation(event.intercom_conversation_id, replyMessage, replyAdminId);
-    logger.info("reply success", { reply_source: replySource, admin_id: replyAdminId, category: session.category ?? null, concierge_key: targeting.conciergeKey ?? null, ...ctx });
+    if (replyMode === "note") {
+      await addNoteToConversation(event.intercom_conversation_id, replyMessage, replyAdminId);
+    } else {
+      await replyToConversation(event.intercom_conversation_id, replyMessage, replyAdminId);
+    }
+    logger.info("reply success", { reply_source: replySource, reply_mode: replyMode, admin_id: replyAdminId, category: session.category ?? null, concierge_key: targeting.conciergeKey ?? null, ...ctx });
 
     // handoff reply 成功 → handed_off に遷移
     if (replySource === "handoff") {

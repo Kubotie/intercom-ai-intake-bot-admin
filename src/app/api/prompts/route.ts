@@ -16,18 +16,12 @@ async function nocoFetch(path: string, options: RequestInit = {}) {
   return res.json();
 }
 
-function normalizeId(record: Record<string, unknown>): number | undefined {
-  const v = record["Id"] ?? record["id"] ?? record["rowId"] ?? record["row_id"];
-  return typeof v === "number" ? v : (typeof v === "string" ? parseInt(v, 10) || undefined : undefined);
-}
-
 export async function GET() {
   if (!TABLE) return NextResponse.json({ error: "NOCODB_PROMPTS_TABLE_ID not set" }, { status: 500 });
   try {
     const data = await nocoFetch(`/tables/${TABLE}/records?limit=50&sort=prompt_key`);
-    const raw: Record<string, unknown>[] = data.list ?? [];
-    const list = raw.map(r => ({ ...r, Id: normalizeId(r) }));
-    logger.info("prompts: list fetched", { count: list.length, sampleId: list[0]?.Id });
+    const list: Record<string, unknown>[] = data.list ?? [];
+    logger.info("prompts: list fetched", { count: list.length });
     return NextResponse.json({ list });
   } catch (err) {
     logger.error("prompts: list failed", { error: (err as Error).message });
@@ -38,20 +32,21 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   if (!TABLE) return NextResponse.json({ error: "NOCODB_PROMPTS_TABLE_ID not set" }, { status: 500 });
   const body = await request.json();
-  const Id: number | undefined = body.Id ?? body.id ?? body.rowId;
+  const promptKey: string | undefined = body.prompt_key ?? body.promptKey;
   const { content } = body;
-  if (!Id || typeof content !== "string") {
-    return NextResponse.json({ error: `Id and content are required (got Id=${Id}, contentType=${typeof content})` }, { status: 400 });
+  if (!promptKey || typeof content !== "string") {
+    return NextResponse.json({ error: `prompt_key and content are required` }, { status: 400 });
   }
   try {
-    await nocoFetch(`/tables/${TABLE}/records`, {
+    const where = `(prompt_key,eq,${encodeURIComponent(promptKey)})`;
+    await nocoFetch(`/tables/${TABLE}/records?where=${where}`, {
       method: "PATCH",
-      body: JSON.stringify({ Id, content }),
+      body: JSON.stringify({ content }),
     });
-    logger.info("prompts: updated", { Id });
+    logger.info("prompts: updated", { promptKey });
     return NextResponse.json({ ok: true });
   } catch (err) {
-    logger.error("prompts: update failed", { Id, error: (err as Error).message });
+    logger.error("prompts: update failed", { promptKey, error: (err as Error).message });
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
 }

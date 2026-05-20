@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Save, RefreshCw, CheckCircle2, AlertCircle, FileText } from "lucide-react";
 
 type Prompt = {
-  Id: number;
   prompt_key: string;
   content: string;
   description: string;
@@ -50,11 +49,11 @@ export default function PromptsPage() {
       const res = await fetch("/api/prompts", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Id: selected.Id, content: draft }),
+        body: JSON.stringify({ prompt_key: selected.prompt_key, content: draft }),
       });
       if (!res.ok) throw new Error(await res.text());
       // ローカル state も更新
-      setPrompts(ps => ps.map(p => p.Id === selected.Id ? { ...p, content: draft } : p));
+      setPrompts(ps => ps.map(p => p.prompt_key === selected.prompt_key ? { ...p, content: draft } : p));
       setSelected(s => s ? { ...s, content: draft } : s);
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 2000);
@@ -83,10 +82,10 @@ export default function PromptsPage() {
           <p className="text-sm text-[var(--text-muted)]">読み込み中…</p>
         ) : prompts.map(p => (
           <button
-            key={p.Id}
+            key={p.prompt_key}
             onClick={() => select(p)}
             className={`text-left px-3 py-2.5 rounded-md border text-sm transition-colors ${
-              selected?.Id === p.Id
+              selected?.prompt_key === p.prompt_key
                 ? "bg-zinc-900 text-white border-zinc-900"
                 : "bg-white text-[var(--text-primary)] border-[var(--border)] hover:bg-zinc-50"
             }`}
@@ -96,7 +95,7 @@ export default function PromptsPage() {
               <span className="font-mono text-xs font-medium truncate">{p.prompt_key}</span>
             </div>
             {p.description && (
-              <p className={`text-[11px] mt-0.5 truncate ${selected?.Id === p.Id ? "text-zinc-300" : "text-[var(--text-muted)]"}`}>
+              <p className={`text-[11px] mt-0.5 truncate ${selected?.prompt_key === p.prompt_key ? "text-zinc-300" : "text-[var(--text-muted)]"}`}>
                 {p.description}
               </p>
             )}

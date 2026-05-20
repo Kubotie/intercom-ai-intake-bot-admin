@@ -8,6 +8,9 @@
 // ─────────────────────────────────────────────
 
 import { HANDOFF_MIN_CONDITION_BY_CATEGORY, CANCELLATION_KEYWORDS } from "./categories.js";
+import { evaluateHandoffReadinessNL } from "./llm.js";
+import { config } from "./config.js";
+import { logger } from "./logger.js";
 
 export const HANDOFF_REPLY =
   "ご共有ありがとうございます。必要な情報を確認できましたので、担当者に引き継いで確認いたします。必要に応じて追加でご連絡します。";
@@ -58,6 +61,47 @@ export function isReadyForHandoff(category, slots) {
   }
 
   return true;
+}
+
+/**
+ * 自然言語指示 (nlInstruction) をもとに LLM でハンドオフ判定する。
+ * LLM 未設定または失敗時はルールベース (isReadyForHandoff) にフォールバック。
+ *
+ * @param {string} category
+ * @param {Array} slots - support_ai_slots rows
+ * @param {string} nlInstruction - Admin UI で記述した自然言語の対応方針
+ * @param {string} latestUserMessage
+ * @returns {Promise<{ ready: boolean; reason: string; source: string }>}
+ */
+export async function isReadyForHandoffNL(category, slots, nlInstruction, latestUserMessage) {
+  if (!nlInstruction || !config.llm.apiKey) {
+    const ready = isReadyForHandoff(category, slots);
+    return { ready, reason: resolveHandoffReason(category, slots) ?? "", source: "rule_based" };
+  }
+
+  const collectedSlots = Object.fromEntries(
+    slots.filter(isFilledSlot).map((s) => [s.slot_name, s.slot_value])
+  );
+
+  try {
+    const result = await evaluateHandoffReadinessNL({
+      category,
+      nlInstruction,
+      collectedSlots,
+      latestUserMessage
+    });
+    logger.info("handoff eval NL completed", {
+      category,
+      ready: result.ready,
+      reason: result.reason,
+      source: "nl_instruction"
+    });
+    return { ready: result.ready === true, reason: result.reason ?? "", source: "nl_instruction" };
+  } catch (err) {
+    logger.warn("handoff eval NL failed, using rule-based fallback", { category, error: err?.message });
+    const ready = isReadyForHandoff(category, slots);
+    return { ready, reason: resolveHandoffReason(category, slots) ?? "", source: "rule_based_fallback" };
+  }
 }
 
 /**

@@ -100,3 +100,12 @@ export async function listMessagesBySessionUid(sessionUid, limit = 10) {
   });
   return unwrapList(data);
 }
+
+export async function getActiveWorkflow() {
+  if (!config.nocodb.tables.workflows) return null;
+  const data = await listRecords(config.nocodb.tables.workflows, {
+    where: "(status,eq,active)",
+    limit: 1
+  });
+  return unwrapList(data)[0] || null;
+}

@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { loadPolicyBundle, loadPromptAsync } from "./policy-loader.js";
+import { loadPolicyBundle, loadPrompt } from "./policy-loader.js";
 
 function extractJson(text) {
   const trimmed = String(text || "").trim();
@@ -32,59 +32,46 @@ async function chat(messages) {
   return extractJson(content);
 }
 
-/**
- * categoryCandidates: string[] | { key: string, label: string, description?: string }[]
- * 後者の場合、label/description をプロンプトに追記してカスタムカテゴリの識別精度を上げる。
- */
-export async function classifyCategory({ latestUserMessage, categoryCandidates }) {
+export async function classifyCategory({ latestUserMessage, categoryCandidates, categoryDefinitions }) {
   const policyBundle = loadPolicyBundle();
-  const prompt = await loadPromptAsync("prompts/classifier_prompt.md");
-
-  // 文字列配列と {key,label,description} 配列の両方に対応
-  const isEnriched = categoryCandidates.length > 0 && typeof categoryCandidates[0] === "object";
-  const candidateKeys = isEnriched ? categoryCandidates.map(c => c.key) : categoryCandidates;
-
-  // カスタムカテゴリの定義をプロンプトに動的追記
-  let customSection = "";
-  if (isEnriched) {
-    const customDefs = categoryCandidates
-      .filter(c => c.description || c.label !== c.key)
-      .map(c => `- **${c.key}** (${c.label})${c.description ? `: ${c.description}` : ""}`)
-      .join("\n");
-    if (customDefs) {
-      customSection = `\n\n## ワークフロー追加カテゴリ（上記と同等に使用可能）\n\n${customDefs}`;
-    }
-  }
-
-  return chat([
-    { role: "system", content: policyBundle },
-    { role: "system", content: prompt + customSection },
-    { role: "user", content: JSON.stringify({ latest_user_message: latestUserMessage, category_candidates: candidateKeys }, null, 2) }
-  ]);
-}
-
-export async function generateNextQuestion({ category, requiredSlots, collectedSlots, askSlots, latestUserMessage, conversationHistorySummary, escalationSignals, customerName, isFirstContact }) {
-  const policyBundle = loadPolicyBundle();
-  const prompt = await loadPromptAsync("prompts/next_question_prompt.md");
+  const prompt = loadPrompt("prompts/classifier_prompt.md");
+  const userPayload = { latest_user_message: latestUserMessage, category_candidates: categoryCandidates };
+  if (categoryDefinitions) userPayload.category_definitions = categoryDefinitions;
   return chat([
     { role: "system", content: policyBundle },
     { role: "system", content: prompt },
-    { role: "user", content: JSON.stringify({
-      category,
-      required_slots: requiredSlots,
-      collected_slots: collectedSlots,
-      ask_slots: askSlots,
-      latest_user_message: latestUserMessage,
-      conversation_history_summary: conversationHistorySummary,
-      escalation_signals: escalationSignals,
-      customer_name: customerName || null,
-      is_first_contact: isFirstContact || false
-    }, null, 2) }
+    { role: "user", content: JSON.stringify(userPayload, null, 2) }
+  ]);
+}
+
+export async function generateNextQuestion({ category, nlInstruction, globalPolicyInstruction, requiredSlots, collectedSlots, askSlots, latestUserMessage, conversationHistorySummary, escalationSignals, customerName, isFirstContact, imageDescriptions, urlContext, allowImageMarkdown }) {
+  const policyBundle = loadPolicyBundle();
+  const prompt = loadPrompt("prompts/next_question_prompt.md");
+  const payload = {
+    category,
+    nl_instruction: nlInstruction ?? null,
+    global_policy_instruction: globalPolicyInstruction ?? null,
+    required_slots: requiredSlots,
+    collected_slots: collectedSlots,
+    ask_slots: askSlots,
+    latest_user_message: latestUserMessage,
+    customer_name: customerName || null,
+    is_first_contact: isFirstContact || false,
+    conversation_history_summary: conversationHistorySummary,
+    escalation_signals: escalationSignals,
+  };
+  if (imageDescriptions) payload.image_descriptions = imageDescriptions;
+  if (urlContext && urlContext.length > 0) payload.url_context = urlContext;
+  if (allowImageMarkdown) payload.allow_image_markdown = true;
+  return chat([
+    { role: "system", content: policyBundle },
+    { role: "system", content: prompt },
+    { role: "user", content: JSON.stringify(payload, null, 2) }
   ]);
 }
 
 export async function extractSlots({ category, requiredSlots, latestUserMessage }) {
-  const prompt = await loadPromptAsync("prompts/slot_extractor_prompt.md");
+  const prompt = loadPrompt("prompts/slot_extractor_prompt.md");
   return chat([
     { role: "system", content: prompt },
     { role: "user", content: JSON.stringify({
@@ -95,9 +82,22 @@ export async function extractSlots({ category, requiredSlots, latestUserMessage 
   ]);
 }
 
+export async function evaluateHandoffReadinessNL({ category, nlInstruction, collectedSlots, latestUserMessage }) {
+  const prompt = loadPrompt("prompts/handoff_eval_prompt.md");
+  return chat([
+    { role: "system", content: prompt },
+    { role: "user", content: JSON.stringify({
+      category,
+      nl_instruction: nlInstruction,
+      collected_slots: collectedSlots,
+      latest_user_message: latestUserMessage
+    }, null, 2) }
+  ]);
+}
+
 export async function summarizeForAgent(input) {
   const policyBundle = loadPolicyBundle();
-  const prompt = await loadPromptAsync("prompts/summarizer_prompt.md");
+  const prompt = loadPrompt("prompts/summarizer_prompt.md");
   return chat([
     { role: "system", content: policyBundle },
     { role: "system", content: prompt },

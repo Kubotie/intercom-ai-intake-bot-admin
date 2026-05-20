@@ -13,7 +13,7 @@ import {
 } from "./nocodb-repo.js";
 import { logger } from "./logger.js";
 import { config } from "./config.js";
-import { replyToConversation } from "./intercom-api.js";
+import { replyToConversation, addNoteToConversation } from "./intercom-api.js";
 import { classifyCategory, extractSlots, generateNextQuestion } from "./llm.js";
 import { CATEGORY_LIST, REQUIRED_SLOTS_BY_CATEGORY, SLOT_PRIORITY_BY_CATEGORY } from "./categories.js";
 import { resolveReplyMessage } from "./reply-resolver.js";
@@ -1435,9 +1435,15 @@ export async function processIntercomWebhook(payload) {
     ...ctx
   });
 
+  const replyMode = targeting.concierge?.reply_mode ?? "reply";
   try {
-    await replyToConversation(event.intercom_conversation_id, replyMessage);
-    logger.info("reply success", { reply_source: replySource, ...ctx });
+    if (replyMode === "note") {
+      await addNoteToConversation(event.intercom_conversation_id, replyMessage);
+      logger.info("note added (memo mode)", { reply_source: replySource, ...ctx });
+    } else {
+      await replyToConversation(event.intercom_conversation_id, replyMessage);
+      logger.info("reply success", { reply_source: replySource, ...ctx });
+    }
 
     // bot 返信をメッセージ履歴に保存（会話履歴の両方向化）
     try {

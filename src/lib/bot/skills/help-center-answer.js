@@ -54,10 +54,19 @@ function extractQuestionSegments(message) {
 
 function buildQuery(category, latestUserMessage, collectedSlots) {
   const parts = [];
-  if (category === "experience_issue") {
+  if (["ab_test_experience", "heatmap_analytics", "popup_event", "experience_issue"].includes(category)) {
     if (collectedSlots?.experience_name) parts.push(collectedSlots.experience_name);
     if (collectedSlots?.symptom) parts.push(collectedSlots.symptom);
     if (collectedSlots?.device_type) parts.push(collectedSlots.device_type);
+    if (collectedSlots?.target_url) parts.push(collectedSlots.target_url);
+  } else if (category === "tracking_issue") {
+    if (collectedSlots?.symptom) parts.push(collectedSlots.symptom);
+    if (collectedSlots?.tag_type) parts.push(collectedSlots.tag_type);
+    if (collectedSlots?.target_url) parts.push(collectedSlots.target_url);
+  } else if (category === "customization_integration") {
+    if (collectedSlots?.target_feature) parts.push(collectedSlots.target_feature);
+    if (collectedSlots?.third_party_tool) parts.push(collectedSlots.third_party_tool);
+    if (collectedSlots?.symptom) parts.push(collectedSlots.symptom);
   } else {
     if (collectedSlots?.target_feature) parts.push(collectedSlots.target_feature);
     if (collectedSlots?.user_goal) parts.push(collectedSlots.user_goal);
@@ -216,7 +225,7 @@ async function generateAnswerFromSources(latestUserMessage, collectedSlots, sour
     ? "顧客は複数の質問をしています。それぞれの質問に番号付きで回答してください（① ② ③ …）"
     : "複数の記事が関連する場合は統合して箇条書きで回答する";
 
-  const systemPrompt = await loadSkillPrompt("help-center-answer", {
+  const systemPrompt = loadSkillPrompt("help-center-answer", {
     customer_label: customerLabel,
     multi_question_instruction: multiQuestionInstruction
   });
@@ -257,6 +266,7 @@ async function generateAnswerFromSources(latestUserMessage, collectedSlots, sour
 const SUPPORTED_CATEGORIES = new Set([
   "usage_guidance",
   "experience_issue",
+  "tracking_issue",
   "login_account",
   "billing_contract",
   "general_inquiry"

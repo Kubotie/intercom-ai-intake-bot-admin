@@ -1,6 +1,11 @@
-以下のユーザー発話を、定義済みカテゴリのうち最も適切な1つに分類してください。
+以下のユーザー発話を、定義済みカテゴリと2つの補助次元で分類してください。
 
-## カテゴリ定義
+## 動的カテゴリ定義の使用方法
+
+入力 JSON に `category_definitions` が含まれている場合、各カテゴリの `description`・`examples`・`boundary_notes` を**優先的に**使用して分類すること。
+`category_definitions` がない場合、または `category_definitions` に含まれないカテゴリは、以下のデフォルト定義を使うこと。
+
+## デフォルトカテゴリ定義
 
 - **tracking_issue**: タグ設置・GTM設定・イベント計測・データ欠損など計測そのものの問題。「計測されない」「GTMでエラー」「タグが検出されない」。体験/A/BテストのCV計測が取れない場合も含む。
 - **report_difference**: レポート数値がGA4・社内集計と異なる・数値差異の原因追求が主。
@@ -23,11 +28,118 @@ billing_contract > login_account > experience_issue > tracking_issue > bug_repor
 - 「できない」「動かない」は usage_guidance ではなく experience_issue か bug_report を検討
 - 「プレビューで確認したい」「設定の仕方がわからない」は experience_issue か usage_guidance → 体験関連なら **experience_issue**
 
+---
+
+## アクション意図（action_intent）
+
+ユーザーがそのトピックに対して「何をしたいか」を以下の4値から1つ選ぶこと。
+
+- **troubleshoot**: 何かが動かない・エラーが出る・期待通りに動作しない状況を「直したい」。「〜できない」「〜が出ない」「〜がおかしい」。
+- **learn**: 使い方・設定手順・機能の場所を「知りたい」。「〜はどうやるか」「〜はどこですか」「〜できますか（可否確認）」。
+- **verify**: 現在の数値・設定・状態が「正しいか確認したい」。「〜と差異がある」「〜と一致しない」「〜は合っていますか」。
+- **request**: プラン変更・解約・機能要望など「何かを変更・依頼したい」。「〜したい」「〜をお願いしたい」。
+
+### action_intent 判定のポイント
+
+- `troubleshoot` vs `learn`: 「今まさに動かない」は troubleshoot。「やり方を知りたい」は learn。
+- `troubleshoot` vs `verify`: 症状がある（動かない）は troubleshoot。数値のずれを確認したいだけは verify。
+- `billing_contract` は原則 `request`（解約・変更の意思表明）。請求内容の確認だけなら `verify`。
+- `login_account` は原則 `troubleshoot`（ログインできない状態）。
+
+---
+
+## 緊急度（urgency）
+
+- **high**: ビジネス影響が大きい、もしくは感情的な切迫感がある。「急いでいます」「今すぐ」「広告費が無駄」「キャンペーンが」「本番が」「至急」「困っています」。
+- **normal**: 通常のサポート問い合わせ。
+
+---
+
+## 感情（sentiment）
+
+- **frustrated**: 不満・焦り・怒りが読み取れる。「なぜ」「ずっと」「何度も」「おかしい」「困っている」「ひどい」。
+- **neutral**: 感情的な要素が少なく、事実確認・情報収集のトーン。
+- **positive**: 前向き・丁寧・感謝のトーン。
+
+---
+
+## Few-shot 例
+
+**例1**
+入力: 「GTMでPtengineのタグを設置したのですが、管理画面でタグが検出されませんと表示されます」
+```json
+{
+  "category": "tracking_issue",
+  "action_intent": "troubleshoot",
+  "urgency": "normal",
+  "sentiment": "neutral",
+  "confidence": 0.92,
+  "reason": "GTMタグが検出されない→計測問題かつ直したい意図"
+}
+```
+
+**例2**
+入力: 「ヒートマップの設定方法を教えてください。どこから作ればいいですか？」
+```json
+{
+  "category": "usage_guidance",
+  "action_intent": "learn",
+  "urgency": "normal",
+  "sentiment": "neutral",
+  "confidence": 0.95,
+  "reason": "設定方法を知りたい→learn。ヒートマップの使い方案内"
+}
+```
+
+**例3**
+入力: 「Ptengineのセッション数がGA4の数値と全然違うのですが、これは正常ですか？」
+```json
+{
+  "category": "report_difference",
+  "action_intent": "verify",
+  "urgency": "normal",
+  "sentiment": "neutral",
+  "confidence": 0.90,
+  "reason": "数値の差異を確認したい→verify。report_differenceの典型"
+}
+```
+
+**例4**
+入力: 「来月から料金プランをダウングレードしたいのですが、手続きを教えてください」
+```json
+{
+  "category": "billing_contract",
+  "action_intent": "request",
+  "urgency": "normal",
+  "sentiment": "neutral",
+  "confidence": 0.93,
+  "reason": "プラン変更の依頼→request。billing_contract"
+}
+```
+
+**例5**
+入力: 「A/Bテストのバナーが全く表示されません！キャンペーンが明日なので急いでいます」
+```json
+{
+  "category": "experience_issue",
+  "action_intent": "troubleshoot",
+  "urgency": "high",
+  "sentiment": "frustrated",
+  "confidence": 0.94,
+  "reason": "体験が表示されない→troubleshoot。明日キャンペーン→urgency:high"
+}
+```
+
+---
+
 ## 返却形式
 
 ```json
 {
   "category": "...",
+  "action_intent": "troubleshoot|learn|verify|request",
+  "urgency": "high|normal",
+  "sentiment": "frustrated|neutral|positive",
   "confidence": 0.0,
   "reason": "..."
 }

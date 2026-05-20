@@ -6,24 +6,27 @@ import {
   countMessagesBySessionUid,
   findMessageByIntercomMessageId,
   findSessionByConversationId,
+  listMessagesBySessionUid,
   listSlotsBySessionUid,
   updateSession,
   updateSlot
 } from "./nocodb-repo.js";
 import { logger } from "./logger.js";
 import { config } from "./config.js";
-import { replyToConversation, addNoteToConversation } from "./intercom-api.js";
+import { replyToConversation } from "./intercom-api.js";
 import { classifyCategory, extractSlots, generateNextQuestion } from "./llm.js";
 import { CATEGORY_LIST, REQUIRED_SLOTS_BY_CATEGORY, SLOT_PRIORITY_BY_CATEGORY } from "./categories.js";
 import { resolveReplyMessage } from "./reply-resolver.js";
 import { isAllowedReplyTarget } from "./reply-guard.js";
 import { resolveTargetAndConcierge } from "./targeting.js";
-import { isReadyForHandoff, resolveHandoffReason } from "./handoff-guard.js";
+import { isReadyForHandoff, isReadyForHandoffNL, resolveHandoffReason } from "./handoff-guard.js";
+import { getIntentNLInstruction, getClassifyConfig, getConciergeTools, getNlPolicyInstruction, getCategoryList } from "./workflow-config-loader.js";
+import { extractImageAttachments, describeImages } from "./tools/image-reader.js";
+import { loadPage, extractUrls } from "./tools/page-loader.js";
 import { dbStatusToInternal, buildSessionObservabilityFields, validateSessionCreatePayload } from "./nocodb-mapper.js";
 import { runSkillOrchestration } from "./skills/orchestrator.js";
-import { getActiveWorkflow, parseWorkflowOverrides, mergeWorkflowSkillProfile, resolveHandoffPreset, resolveIntentConfig, resolveEscalationKeywords } from "./workflow-resolver.js";
-import { resolveExecutionProfile } from "./concierge-profiles.js";
 import { buildHandoffSummary } from "./handoff-summary.js";
+import { resolveExecutionProfile } from "./concierge-profiles.js";
 import { enrichContactFromUrl } from "./project-enrichment.js";
 
 // ─────────────────────────────────────────────
@@ -38,10 +41,23 @@ const FALLBACK_CATEGORY = "usage_guidance";
 // これらは情報収集よりも「答えを出す」ことが優先される intent
 const KNOWLEDGE_FIRST_CATEGORIES = new Set(["usage_guidance", "ab_test_experience", "heatmap_analytics", "popup_event", "customization_integration"]);
 
-// エスカレーション判定キーワード (簡易ルール)
+// エスカレーション判定キーワードのデフォルト値。
+// 実行時は executionProfile.policyProfile.escalationKeywords で上書きされる。
 // 「解約」は billing_contract での structured handoff で対応するため除外。
-// 返金・クレーム色が強いものは引き続き即時 escalation。
-const ESCALATION_KEYWORDS = ["至急", "緊急", "全く使えない", "障害", "返金", "全員使えない", "全社員", "本番が止まっている"];
+const DEFAULT_ESCALATION_KEYWORDS = ["至急", "緊急", "全く使えない", "障害", "返金", "全員使えない", "全社員", "本番が止まっている"];
+
+// トピック変更シグナル: ユーザーが別件に切り替えたことを示す表現
+const TOPIC_CHANGE_SIGNALS = [
+  "別件で", "別件ですが", "別の件で", "別の件ですが",
+  "別の質問", "別の相談", "違う件", "異なる件",
+  "別のことで", "新しい質問", "話が変わります",
+  "actually,", "by the way,",
+];
+
+function hasSwitchSignal(message) {
+  const lower = message.toLowerCase();
+  return TOPIC_CHANGE_SIGNALS.some(s => lower.includes(s.toLowerCase()));
+}
 
 // slot 名 → 日本語ラベル (fallback メッセージ生成用)
 const SLOT_LABELS = {
@@ -92,15 +108,14 @@ function isFilledSlot(slot) {
 
 // ─────────────────────────────────────────────
 // エスカレーション判定 (キーワードベース)
-// workflowKeywords が空でなければ workflow v2 の keywords を使う
+// keywords は executionProfile.policyProfile.escalationKeywords を渡す。
+// 未指定時は DEFAULT_ESCALATION_KEYWORDS を使う。
 // ─────────────────────────────────────────────
-function checkEscalation(message, workflowKeywords = []) {
-  const keywords = workflowKeywords.length > 0 ? workflowKeywords : ESCALATION_KEYWORDS;
+function checkEscalation(message, keywords = DEFAULT_ESCALATION_KEYWORDS) {
   return keywords.some((kw) => message.includes(kw));
 }
 
-function resolveEscalationReason(message, workflowKeywords = []) {
-  const keywords = workflowKeywords.length > 0 ? workflowKeywords : ESCALATION_KEYWORDS;
+function resolveEscalationReason(message, keywords = DEFAULT_ESCALATION_KEYWORDS) {
   const triggered = keywords.filter((kw) => message.includes(kw));
   if (triggered.length === 0) return null;
   return triggered.map((kw) => `keyword:${kw}`).join(", ");
@@ -171,70 +186,68 @@ async function persistSessionFields(rowId, patch, ctx) {
 // ─────────────────────────────────────────────
 // category 判定: LLM 未設定時は fallback
 // ─────────────────────────────────────────────
-async function runClassification(latestUserMessage, ctx, intentsConfig = null) {
+async function runClassification(latestUserMessage, ctx) {
   if (!config.llm.apiKey) {
     logger.info("category fallback used (LLM_API_KEY not set)", { category: FALLBACK_CATEGORY, confidence: 0, ...ctx });
-    return { category: FALLBACK_CATEGORY, confidence: 0, reason: "LLM_API_KEY not configured" };
+    return { category: FALLBACK_CATEGORY, confidence: 0, reason: "LLM_API_KEY not configured", actionIntent: "troubleshoot", urgency: "normal", sentiment: "neutral" };
   }
 
-  // ワークフローのカスタムカテゴリをエンリッチして分類候補に追加
-  const customEntries = Object.entries(intentsConfig?.intents ?? {})
-    .filter(([k, v]) => !CATEGORY_LIST.includes(k) && v?.enabled !== false)
-    .map(([k, v]) => ({
-      key: k,
-      label: v.label ?? k,
-      description: (v.classifyDescription ?? "").slice(0, 120),
-    }));
-  // ワークフロー設定で明示的に enabled:false のテンプレートカテゴリは除外
-  const enabledTemplateCats = CATEGORY_LIST.filter(k => {
-    const cfg = intentsConfig?.intents?.[k];
-    return !cfg || cfg.enabled !== false;
-  });
-  const allCandidates = [...enabledTemplateCats, ...customEntries];
-  const allKeys = [...enabledTemplateCats, ...customEntries.map(e => e.key)];
+  // ワークフロー設定から動的カテゴリ定義を取得 (未設定なら null → 静的プロンプトにフォールバック)
+  const [categoryDefinitions, dynamicCategoryList] = await Promise.all([
+    getClassifyConfig().catch(() => null),
+    getCategoryList().catch(() => CATEGORY_LIST),
+  ]);
+  const classifySource = categoryDefinitions ? "workflow_config" : "static_prompt";
 
-  logger.info("category classification started", ctx);
+  logger.info("category classification started", { ...ctx, classify_source: classifySource, category_count: dynamicCategoryList.length });
   try {
-    const result = await classifyCategory({ latestUserMessage, categoryCandidates: allCandidates });
-    const category = allKeys.includes(result.category) ? result.category : FALLBACK_CATEGORY;
+    const result = await classifyCategory({ latestUserMessage, categoryCandidates: dynamicCategoryList, categoryDefinitions });
+    const category = dynamicCategoryList.includes(result.category) ? result.category : FALLBACK_CATEGORY;
     const confidence = result.confidence ?? 0;
     const reason = result.reason ?? "";
+    const actionIntent = ["troubleshoot", "learn", "verify", "request"].includes(result.action_intent)
+      ? result.action_intent
+      : "troubleshoot";
+    const urgency = result.urgency === "high" ? "high" : "normal";
+    const sentiment = ["frustrated", "neutral", "positive"].includes(result.sentiment)
+      ? result.sentiment
+      : "neutral";
     if (category !== result.category) {
-      logger.info("category fallback used (unknown category from LLM)", { category, rawCategory: result.category, confidence, ...ctx });
+      logger.info("category fallback used (unknown category from LLM)", { category, rawCategory: result.category, confidence, classify_source: classifySource, ...ctx });
     } else {
-      logger.info("category classified", { category, confidence, reason, ...ctx });
+      logger.info("category classified", { category, confidence, reason, action_intent: actionIntent, urgency, sentiment, classify_source: classifySource, ...ctx });
     }
-    return { category, confidence, reason };
+    return { category, confidence, reason, actionIntent, urgency, sentiment };
   } catch (err) {
     logger.warn("category classification failed, using fallback", { error: err?.message, ...ctx });
     logger.info("category fallback used", { category: FALLBACK_CATEGORY, confidence: 0, ...ctx });
-    return { category: FALLBACK_CATEGORY, confidence: 0, reason: `classification error: ${err?.message}` };
+    return { category: FALLBACK_CATEGORY, confidence: 0, reason: `classification error: ${err?.message}`, actionIntent: "troubleshoot", urgency: "normal", sentiment: "neutral" };
   }
 }
 
 // ─────────────────────────────────────────────
 // required slots 初期投入 (重複スキップ付き)
-// intentOverride があれば workflow v2 のスロット定義を使う
 // ─────────────────────────────────────────────
-async function initRequiredSlots(sessionUid, category, ctx, intentOverride = null) {
+async function initRequiredSlots(sessionUid, category, ctx) {
   if (!config.nocodb.tables.slots) {
     logger.warn("NOCODB_SLOTS_TABLE_ID not set, skipping slot init", { sessionUid, category });
     return;
   }
 
-  const required = intentOverride?.slots?.required ?? REQUIRED_SLOTS_BY_CATEGORY[category] ?? [];
+  const required = REQUIRED_SLOTS_BY_CATEGORY[category] || [];
   if (required.length === 0) return;
 
   const existing = await listSlotsBySessionUid(sessionUid);
-  const existingNames = new Set(existing.map((s) => s.slot_name));
+  const existingByName = Object.fromEntries(existing.map((s) => [s.slot_name, s]));
 
   let created = 0;
-  let skipped = 0;
+  let reactivated = 0;
 
   for (const slotName of required) {
-    if (existingNames.has(slotName)) {
-      logger.info("slot init skipped (already exists)", { sessionUid, slotName, category, ...ctx });
-      skipped++;
+    if (existingByName[slotName]) {
+      // カテゴリ切り替え後の再アクティブ化: is_required を true に戻す（値は保持）
+      await updateSlot(existingByName[slotName].Id, { isRequired: true });
+      reactivated++;
     } else {
       await createSlot({
         sessionUid,
@@ -254,19 +267,18 @@ async function initRequiredSlots(sessionUid, category, ctx, intentOverride = nul
     category,
     slotCount: required.length,
     created,
-    skipped,
+    reactivated,
     ...ctx
   });
 }
 
 // ─────────────────────────────────────────────
 // slot 抽出: latest_user_message から required slots を埋める
-// intentOverride があれば workflow v2 のスロット定義を使う
 // ─────────────────────────────────────────────
-async function runSlotExtraction(sessionUid, category, latestUserMessage, ctx, intentOverride = null) {
+async function runSlotExtraction(sessionUid, category, latestUserMessage, ctx) {
   if (!config.nocodb.tables.slots) return;
 
-  const requiredSlots = intentOverride?.slots?.required ?? REQUIRED_SLOTS_BY_CATEGORY[category] ?? [];
+  const requiredSlots = REQUIRED_SLOTS_BY_CATEGORY[category] || [];
   if (requiredSlots.length === 0) return;
 
   logger.info("slot extraction started", { sessionUid, category, ...ctx });
@@ -320,12 +332,8 @@ async function runSlotExtraction(sessionUid, category, latestUserMessage, ctx, i
 // ─────────────────────────────────────────────
 // missing slots から ask_slots を優先順位で最大2件選ぶ
 // ─────────────────────────────────────────────
-function selectAskSlots(category, slots, intentOverride = null) {
-  const priority = intentOverride?.slots?.priority
-    ?? SLOT_PRIORITY_BY_CATEGORY[category]
-    ?? intentOverride?.slots?.required
-    ?? REQUIRED_SLOTS_BY_CATEGORY[category]
-    ?? [];
+function selectAskSlots(category, slots) {
+  const priority = SLOT_PRIORITY_BY_CATEGORY[category] || REQUIRED_SLOTS_BY_CATEGORY[category] || [];
   const missingNames = new Set(
     slots
       .filter((s) => s.is_required && !isFilledSlot(s))
@@ -344,11 +352,44 @@ function buildFallbackNextMessage(askSlots) {
 }
 
 // ─────────────────────────────────────────────
+// soft answer + スロット質問の結合メッセージを生成
+//
+// 部分回答（confidence 0.45〜0.64）の末尾締め文を除去し、
+// 追加で必要なスロット質問を挿入して再度締め文を付与する。
+// ─────────────────────────────────────────────
+const SOFT_ANSWER_CLOSINGS = [
+  "引き続き何かございましたらお気軽にご相談くださいませ。",
+  "引き続きよろしくお願い申し上げます。"
+];
+
+function buildSoftAnswerMessage(softAnswerText, askSlots) {
+  let base = (softAnswerText || "").trim();
+  let detectedClosing = "引き続きよろしくお願い申し上げます。";
+
+  for (const closing of SOFT_ANSWER_CLOSINGS) {
+    if (base.endsWith(closing)) {
+      base = base.slice(0, -closing.length).trimEnd();
+      detectedClosing = closing === "引き続き何かございましたらお気軽にご相談くださいませ。"
+        ? "引き続きよろしくお願い申し上げます。"
+        : closing;
+      break;
+    }
+  }
+
+  if (askSlots.length === 0) {
+    return `${base}\n\n${detectedClosing}`;
+  }
+
+  const slotLines = askSlots.map((s) => `・${SLOT_LABELS[s] || s}`).join("\n");
+  return `${base}\n\nなお、より詳しい確認のため、以下の情報をお教えいただけますでしょうか？\n${slotLines}\n\n${detectedClosing}`;
+}
+
+// ─────────────────────────────────────────────
 // 次質問候補の生成 (DB 保存は processor が行う)
 // (status=collecting のときのみ呼ばれる)
 // shouldEscalate は主フローで判定済みのものを受け取る
 // ─────────────────────────────────────────────
-async function runNextQuestionGeneration(sessionUid, session, latestUserMessage, shouldEscalate, slots, ctx, intentOverride = null, authorName = null, isFirstContact = false) {
+async function runNextQuestionGeneration(sessionUid, session, latestUserMessage, shouldEscalate, slots, ctx, authorName, isFirstContact = false, nlInstruction = null, toolContext = {}, globalPolicyInstruction = null, conversationHistorySummary = null) {
   if (!config.nocodb.tables.slots) {
     return { candidateData: null };
   }
@@ -365,7 +406,7 @@ async function runNextQuestionGeneration(sessionUid, session, latestUserMessage,
     ...ctx
   });
 
-  const askSlots = selectAskSlots(category, slots, intentOverride);
+  const askSlots = selectAskSlots(category, slots);
   logger.info("ask slots selected", { sessionUid, category, ask_slots: askSlots, ...ctx });
 
   // all slots collected (collecting 状態だが required slots が全部埋まっている)
@@ -394,14 +435,19 @@ async function runNextQuestionGeneration(sessionUid, session, latestUserMessage,
     try {
       const result = await generateNextQuestion({
         category,
-        requiredSlots: intentOverride?.slots?.required ?? REQUIRED_SLOTS_BY_CATEGORY[category] ?? [],
+        nlInstruction: nlInstruction || null,
+        globalPolicyInstruction: globalPolicyInstruction || null,
+        requiredSlots: REQUIRED_SLOTS_BY_CATEGORY[category] || [],
         collectedSlots,
         askSlots,
         latestUserMessage,
-        conversationHistorySummary: null,
-        escalationSignals: [],
         customerName: authorName || null,
-        isFirstContact: isFirstContact || false
+        isFirstContact: isFirstContact || false,
+        conversationHistorySummary: conversationHistorySummary ?? null,
+        escalationSignals: [],
+        imageDescriptions: toolContext.imageDescriptions ?? null,
+        urlContext: toolContext.urlContext ?? null,
+        allowImageMarkdown: toolContext.allowImageMarkdown ?? false,
       });
       nextMessage = result.next_message || nextMessage;
       reason = result.reason || reason;
@@ -492,6 +538,9 @@ export async function processIntercomWebhook(payload) {
   }
 
   // ── 4.5. project enrichment (conversation.user.created のみ) ──────────
+  // source.url から Ptengine project_id を抽出し、
+  // Metabase CSV を参照してコンタクトの Session_Package_type / Session_Project_domain を更新する。
+  // 失敗しても後続処理には影響しない。
   if (event.event_topic === "conversation.user.created" && event.intercom_contact_id) {
     const sourceUrl = rawSrc?.url ?? null;
     logger.info("project-enrichment: source url", { sourceUrl, contact_id: event.intercom_contact_id, ...ctx });
@@ -557,9 +606,56 @@ export async function processIntercomWebhook(payload) {
   if (!sessionRowId) {
     logger.warn("session row id missing after upsert, aborting to prevent empty record creation", {
       session_uid: sessionUid,
-      conversation_id: event.intercom_conversation_id
+      conversation_id: event.intercom_conversation_id,
     });
     return;
+  }
+
+  // ── 5.5. 早期 concierge 解決 + execution profile 確定 ──────────────
+  //
+  // targeting (test target 判定 + concierge 解決) をここで実行し、
+  // executionProfile を確定する。
+  //
+  // executionProfile は以降の全ステップで参照される:
+  //   - Step 8:  escalation keywords (policyProfile)
+  //   - Step 9.5: skill 実行順・confidence threshold (skillProfile)
+  //   - Step 12: reply 可否の判断 (targeting.allowed) — 同じ targeting 結果を再利用
+  //
+  // targeting.allowed === false の場合でも processing は続行し、
+  // Step 12 で reply だけスキップする。
+  //
+  const targeting = await resolveTargetAndConcierge({
+    contactId:      event.intercom_contact_id ?? null,
+    conversationId: event.intercom_conversation_id
+  });
+  const executionProfile = resolveExecutionProfile(targeting.concierge);
+
+  logger.info("concierge resolved", {
+    concierge_key:                targeting.conciergeKey,
+    concierge_name:               targeting.conciergeName,
+    concierge_source:             targeting.conciergeSource,
+    policy_profile_key:           executionProfile.policyProfileKey,
+    skill_profile_key:            executionProfile.skillProfileKey,
+    source_priority_profile_key:  executionProfile.sourcePriorityProfileKey,
+    ...ctx
+  });
+
+  // concierge + profile 情報を session に早期保存
+  try {
+    await updateSession(sessionRowId, {
+      observabilityFields: {
+        concierge_key:                targeting.conciergeKey,
+        concierge_name:               targeting.conciergeName,
+        target_match_reason:          targeting.targetMatchReason,
+        policy_set_key:               executionProfile.policyProfileKey,
+        skill_profile_key:            executionProfile.skillProfileKey,
+        source_priority_profile_key:  executionProfile.sourcePriorityProfileKey,
+      }
+    });
+  } catch (err) {
+    logger.warn("concierge profile session save failed (non-fatal)", {
+      error: err?.message || String(err), ...ctx
+    });
   }
 
   // ── 6. message 保存 ─────────────────────────
@@ -575,68 +671,148 @@ export async function processIntercomWebhook(payload) {
   });
   logger.info("message inserted", { sessionUid, messageOrder, ...ctx });
 
-  // ── 7. active workflow 解決 ──────────────────────────────────────────────
-  //
-  // v2 intents_config / policy_config / source_config を含む全設定を取得する。
-  // カテゴリ判定・エスカレーション判定よりも先に解決することで、
-  // workflow v2 の escalation_keywords / slot 定義を以降の全ステップで利用できる。
-  //
-  let activeWorkflowRecord = null;
-  let workflowOverrides = {
-    skillConfig:   { version: 1, category_skill_order: {} },
-    handoffConfig: { version: 1, global_preset: "balanced", category_presets: {} },
-    policyConfig:  { version: 1, escalation_keywords: [], handoff_eagerness: "normal" },
-    sourceConfig:  { version: 1, allowed: ["help_center", "notion_faq", "known_issue"], priority: ["notion_faq", "help_center", "known_issue"] },
-    intentsConfig: { version: 1, intents: {} },
-    workflowKey:   null,
-    workflowSource: "fallback"
-  };
+  // ── 6.5. 会話履歴サマリー構築 ─────────────────────────────────────
+  // 直近 5 件のユーザーメッセージ（今回分を除く）を LLM コンテキスト用に整形する。
+  let conversationHistorySummary = null;
+  if (messageOrder > 1) {
+    try {
+      const allMsgs = await listMessagesBySessionUid(sessionUid, 10);
+      const prevMsgs = allMsgs
+        .filter(m => m.intercom_message_id !== event.intercom_message_id)
+        .slice(-5);
+      if (prevMsgs.length > 0) {
+        conversationHistorySummary = prevMsgs
+          .map(m => {
+            const role = m.role === "bot" ? "Bot" : "ユーザー";
+            return `${role}: ${String(m.message_text ?? "").slice(0, 300)}`;
+          })
+          .join("\n");
+      }
+    } catch (err) {
+      logger.warn("conversation history retrieval failed (non-fatal)", { sessionUid, error: err?.message, ...ctx });
+    }
+  }
 
-  try {
-    activeWorkflowRecord = await getActiveWorkflow(null);
-    workflowOverrides = parseWorkflowOverrides(activeWorkflowRecord);
-  } catch (err) {
-    logger.warn("workflow resolution failed, using system defaults", {
-      sessionUid,
-      error: err?.message,
-      ...ctx
+  // ── 7. カテゴリ判定 + 多次元意図分類 ─────────────────────────────────
+  // actionIntent / urgency / sentiment はターンごとに再判定する。
+  // NocoDB への保存は observabilityFields 経由（Step 10 の persistSessionFields で保存）。
+  let actionIntent = "troubleshoot"; // デフォルト
+  let urgency      = "normal";
+  let sentiment    = "neutral";
+
+  if (!session.category) {
+    // 初回メッセージ: 分類して設定
+    const result = await runClassification(event.latest_user_message, { sessionUid, ...ctx });
+    actionIntent = result.actionIntent;
+    urgency      = result.urgency;
+    sentiment    = result.sentiment;
+    await updateSession(sessionRowId, {
+      category: result.category,
+      observabilityFields: { action_intent: actionIntent, urgency, sentiment }
+    });
+    session = { ...session, category: result.category };
+    // learn は症状スロット不要 → initRequiredSlots をスキップ
+    if (actionIntent !== "learn") {
+      await initRequiredSlots(sessionUid, result.category, ctx);
+    }
+  } else if (currentStatus === "handed_off") {
+    // ハンドオフ後に新たなメッセージが届いた: 新規問い合わせとしてリセット
+    logger.info("post-handoff new message — resetting session", { sessionUid, ...ctx });
+    const result = await runClassification(
+      event.latest_user_message, { sessionUid, post_handoff_reset: true, ...ctx }
+    );
+    actionIntent = result.actionIntent;
+    urgency      = result.urgency;
+    sentiment    = result.sentiment;
+    // 既存 required slots を非必須化
+    const existingSlots = await listSlotsBySessionUid(sessionUid);
+    for (const slot of existingSlots.filter(s => s.is_required)) {
+      await updateSlot(slot.Id, { isRequired: false });
+    }
+    await updateSession(sessionRowId, {
+      category: result.category,
+      status: "collecting",
+      observabilityFields: { action_intent: actionIntent, urgency, sentiment }
+    });
+    session       = { ...session, category: result.category };
+    currentStatus = "collecting";
+    if (actionIntent !== "learn") {
+      await initRequiredSlots(sessionUid, result.category, ctx);
+    }
+  } else if (messageOrder > 1 && hasSwitchSignal(event.latest_user_message)) {
+    // 2ターン目以降でトピック変更シグナルを検知: 再分類してカテゴリ切り替えを試みる
+    const result = await runClassification(
+      event.latest_user_message, { sessionUid, topic_change_check: true, ...ctx }
+    );
+    actionIntent = result.actionIntent;
+    urgency      = result.urgency;
+    sentiment    = result.sentiment;
+    if (result.category && result.category !== session.category && result.confidence >= 0.7) {
+      logger.info("topic change detected — switching category", {
+        sessionUid,
+        previous_category: session.category,
+        new_category:      result.category,
+        confidence:        result.confidence,
+        ...ctx
+      });
+      // 既存 required slots を非必須化（旧カテゴリのスロットが handoff 判定に混入しないよう）
+      const existingSlots = await listSlotsBySessionUid(sessionUid);
+      for (const slot of existingSlots.filter(s => s.is_required)) {
+        await updateSlot(slot.Id, { isRequired: false });
+      }
+      await updateSession(sessionRowId, {
+        category: result.category,
+        status: "collecting",
+        observabilityFields: { action_intent: actionIntent, urgency, sentiment }
+      });
+      session      = { ...session, category: result.category };
+      currentStatus = "collecting";
+      if (actionIntent !== "learn") {
+        await initRequiredSlots(sessionUid, result.category, ctx);
+      }
+    } else {
+      // カテゴリ変更なし: action_intent / urgency / sentiment だけ更新
+      await updateSession(sessionRowId, {
+        observabilityFields: { action_intent: actionIntent, urgency, sentiment }
+      });
+    }
+  } else {
+    // 通常の継続ターン: 再分類はしないが毎ターン action_intent を判定してログ
+    const result = await runClassification(
+      event.latest_user_message, { sessionUid, continuing_turn: true, ...ctx }
+    );
+    actionIntent = result.actionIntent;
+    urgency      = result.urgency;
+    sentiment    = result.sentiment;
+    await updateSession(sessionRowId, {
+      observabilityFields: { action_intent: actionIntent, urgency, sentiment }
     });
   }
 
-  // workflow v2 policy: escalation_keywords が設定されていれば上書きする
-  const workflowEscalationKeywords = resolveEscalationKeywords(workflowOverrides.policyConfig);
+  // learn: FAQへ即答するため症状スロット収集をスキップするフラグ
+  const isLearnIntent = actionIntent === "learn";
 
-  logger.info("workflow resolved", {
+  logger.info("action intent resolved", {
     sessionUid,
-    workflow_key:             workflowOverrides.workflowKey ?? null,
-    workflow_source:          workflowOverrides.workflowSource,
-    workflow_status:          activeWorkflowRecord?.status ?? null,
-    has_skill_override:       Object.keys(workflowOverrides.skillConfig?.category_skill_order ?? {}).length > 0,
-    has_intents_override:     Object.keys(workflowOverrides.intentsConfig?.intents ?? {}).length > 0,
-    has_policy_override:      workflowEscalationKeywords.length > 0,
-    global_handoff_preset:    workflowOverrides.handoffConfig?.global_preset ?? "balanced",
+    category: session.category,
+    action_intent: actionIntent,
+    urgency,
+    sentiment,
+    is_learn_intent: isLearnIntent,
     ...ctx
   });
 
-  // ── 7b. カテゴリ判定 (category が未設定の session のみ) ──────────────────
-  if (!session.category) {
-    const { category } = await runClassification(event.latest_user_message, { sessionUid, ...ctx }, workflowOverrides.intentsConfig);
-    await updateSession(sessionRowId, { category });
-    session = { ...session, category };
-
-    // workflow v2 intents_config からカテゴリ別設定を取得してスロット初期化に渡す
-    const intentInitOverride = resolveIntentConfig(workflowOverrides.intentsConfig, category);
-    await initRequiredSlots(sessionUid, category, ctx, intentInitOverride);
-  }
-
-  // workflow v2 intents_config から現カテゴリの設定を取得 (以降のステップ全体で使う)
-  const intentOverride = resolveIntentConfig(workflowOverrides.intentsConfig, session.category);
-
-  // ── 8. エスカレーション判定 (毎ターン実行) ──────────────────────────────
-  // workflow v2 の escalation_keywords があればそれを優先する
-  const shouldEscalate = checkEscalation(event.latest_user_message, workflowEscalationKeywords);
+  // ── 8. エスカレーション判定 (毎ターン実行) ──
+  // executionProfile.policyProfile.escalationKeywords を使う (concierge ごとに設定可能)
+  // urgency:high かつ sentiment:frustrated の組み合わせも追加エスカレーショントリガーとして扱う
+  const escalationKeywords = executionProfile.policyProfile.escalationKeywords;
+  const keywordEscalate = checkEscalation(event.latest_user_message, escalationKeywords);
+  const intentEscalate  = urgency === "high" && sentiment === "frustrated";
+  const shouldEscalate  = keywordEscalate || intentEscalate;
   const escalationReason = shouldEscalate
-    ? resolveEscalationReason(event.latest_user_message, workflowEscalationKeywords)
+    ? (keywordEscalate
+        ? resolveEscalationReason(event.latest_user_message, escalationKeywords)
+        : `intent_signal: urgency=${urgency}, sentiment=${sentiment}`)
     : null;
 
   if (shouldEscalate) {
@@ -645,7 +821,6 @@ export async function processIntercomWebhook(payload) {
       category: session.category,
       should_escalate: true,
       escalation_reason: escalationReason,
-      keyword_source: workflowEscalationKeywords.length > 0 ? "workflow_v2" : "system_default",
       ...ctx
     });
     logger.info("escalation reason resolved", {
@@ -656,34 +831,59 @@ export async function processIntercomWebhook(payload) {
     });
   }
 
-  // concierge は後続の Step で解決するため、ここでは registry default をベースに workflow override のみ適用。
-  // workflow v2 intents_config[category].skills が存在する場合はそれを skill order override として使う。
-  let effectiveSkillConfig = workflowOverrides.skillConfig;
-  if (intentOverride?.skills?.length > 0) {
-    const intentSkillOrder = intentOverride.skills.map((s) => s.name);
-    effectiveSkillConfig = {
-      ...effectiveSkillConfig,
-      category_skill_order: {
-        ...effectiveSkillConfig.category_skill_order,
-        [session.category]: intentSkillOrder  // intent 設定がスキル順序を上書き
+  // ── 8b. コンシェルジュツール実行 ──────────────
+  // 設定されたツールを実行し、LLM コンテキストに追加する情報を収集する。
+  // エラーは非致命的（ログのみ）。
+  const conciergeToolContext = {};
+  {
+    const conciergeTools = await getConciergeTools(executionProfile.conciergeKey ?? "").catch(() => []);
+    if (conciergeTools.length > 0) {
+      logger.info("concierge tools enabled", { sessionUid, tools: conciergeTools, ...ctx });
+    }
+
+    if (conciergeTools.includes("image-reading") && config.llm.apiKey) {
+      try {
+        const imageUrls = extractImageAttachments(payload);
+        if (imageUrls.length > 0) {
+          const desc = await describeImages(imageUrls);
+          if (desc) {
+            conciergeToolContext.imageDescriptions = desc;
+            logger.info("image reading completed", { sessionUid, image_count: imageUrls.length, ...ctx });
+          }
+        }
+      } catch (err) {
+        logger.warn("image reading failed (non-fatal)", { sessionUid, error: err?.message, ...ctx });
       }
-    };
+    }
+
+    if (conciergeTools.includes("page-loading")) {
+      try {
+        const urlsInMessage = extractUrls(event.latest_user_message);
+        if (urlsInMessage.length > 0) {
+          const results = await Promise.all(urlsInMessage.slice(0, 3).map(loadPage));
+          conciergeToolContext.urlContext = results;
+          logger.info("page loading completed", { sessionUid, url_count: results.length, ...ctx });
+        }
+      } catch (err) {
+        logger.warn("page loading failed (non-fatal)", { sessionUid, error: err?.message, ...ctx });
+      }
+    }
+
+    if (conciergeTools.includes("image-referencing")) {
+      conciergeToolContext.allowImageMarkdown = true;
+    }
   }
 
-  const workflowSkillProfile = Object.keys(effectiveSkillConfig?.category_skill_order ?? {}).length > 0
-    ? mergeWorkflowSkillProfile({ orderOverrides: {}, confidenceOverrides: {}, disabled: [] }, effectiveSkillConfig)
-    : null;
+  // ── 8c. グローバル NL ポリシー取得 ───────────────
+  const globalPolicyInstruction = await getNlPolicyInstruction().catch(() => null);
 
-  // workflow source_config_json → sourcePriorityProfile 形式に変換してスキルに渡す
-  const workflowSourceProfile = workflowOverrides.sourceConfig?.allowed?.length > 0
-    ? { allowedSources: workflowOverrides.sourceConfig.allowed }
-    : null;
-
-  // ── 9. slot 抽出 ─────────────────────────────────────────────────────────
+  // ── 9. slot 抽出 ─────────────────────────────
+  // learn intent: FAQ/HC への即答を優先するためスロット収集をスキップ
   // handed_off 後も slot の保存は継続する
-  // workflow v2 intents_config[category].slots があればそれを使う
-  if (config.llm.apiKey && session.category) {
-    await runSlotExtraction(sessionUid, session.category, event.latest_user_message, ctx, intentOverride);
+  if (isLearnIntent) {
+    logger.info("slot extraction skipped (learn intent)", { sessionUid, category: session.category, ...ctx });
+  } else if (config.llm.apiKey && session.category) {
+    await runSlotExtraction(sessionUid, session.category, event.latest_user_message, ctx);
   } else if (!config.llm.apiKey) {
     logger.info("slot extraction skipped (LLM_API_KEY not set)", { sessionUid, category: session.category, ...ctx });
   }
@@ -701,6 +901,7 @@ export async function processIntercomWebhook(payload) {
   let handoffReason = null;
   let allSlots = [];  // Step 9.5 でも再利用する
   let handoffDeferredForSkill = false;  // knowledge-first: skill 評価後に handoff 確定
+  let intentNLInstruction = null;  // 自然言語指示 (Step 9b でロード、Step 10 でも使用)
 
   if (config.nocodb.tables.slots && session.category) {
     allSlots = await listSlotsBySessionUid(sessionUid);
@@ -722,20 +923,29 @@ export async function processIntercomWebhook(payload) {
       ...ctx
     });
 
-    if (currentStatus === "collecting") {
-      // workflow v2 intents_config[category].handoff.preset があればそれを優先、なければ handoff_config から解決
-      const handoffPreset = intentOverride?.handoff?.preset
-        ?? resolveHandoffPreset(workflowOverrides.handoffConfig, session.category);
-      // workflow v2 intents_config[category].handoff.required/any_of があれば条件オーバーライドとして渡す
-      const handoffConditionOverride = (intentOverride?.handoff?.required || intentOverride?.handoff?.any_of)
-        ? { required: intentOverride.handoff.required ?? [], any_of: intentOverride.handoff.any_of ?? [] }
-        : null;
-      const ready = isReadyForHandoff(session.category, allSlots, handoffPreset, handoffConditionOverride);
-      if (ready) {
-        handoffReason = resolveHandoffReason(session.category, allSlots);
+    if (currentStatus === "collecting" && !isLearnIntent) {
+      // NL 指示が設定されていれば LLM で評価、なければルールベース
+      // learn intent: スロット収集もハンドオフ評価もスキップしてスキルへ直行
+      intentNLInstruction = await getIntentNLInstruction(session.category).catch(() => null);
+      const nlInstruction = intentNLInstruction;
+      const handoffEval = await isReadyForHandoffNL(
+        session.category, allSlots, nlInstruction, event.latest_user_message
+      );
+      const ready = handoffEval.ready;
 
-        if (KNOWLEDGE_FIRST_CATEGORIES.has(session.category) || intentOverride?.skills?.length > 0) {
-          // knowledge-first または workflow でスキルが設定されているカテゴリ: skill を試してから handoff 判断する
+      logger.info("handoff eval source", {
+        sessionUid,
+        category: session.category,
+        source: handoffEval.source,
+        nl_instruction_set: !!nlInstruction,
+        ...ctx
+      });
+
+      if (ready) {
+        handoffReason = handoffEval.reason || resolveHandoffReason(session.category, allSlots);
+
+        if (KNOWLEDGE_FIRST_CATEGORIES.has(session.category)) {
+          // knowledge-first: skill を試してから handoff 判断する
           handoffDeferredForSkill = true;
           logger.info("handoff deferred for knowledge skill evaluation", {
             sessionUid,
@@ -743,6 +953,7 @@ export async function processIntercomWebhook(payload) {
             filled_slots: filledSlotNames,
             missing_slots: missingSlotNames,
             handoff_reason: handoffReason,
+            handoff_eval_source: handoffEval.source,
             ...ctx
           });
         } else {
@@ -754,6 +965,7 @@ export async function processIntercomWebhook(payload) {
             filled_slots_count: filledSlotsCount,
             missing_slots_count: missingSlotNames.length,
             handoff_reason: handoffReason,
+            handoff_eval_source: handoffEval.source,
             ...ctx
           });
           logger.info("handoff reason resolved", {
@@ -790,7 +1002,7 @@ export async function processIntercomWebhook(payload) {
   let skillResult = null;
 
   const shouldRunSkillOrchestration = (
-    (currentStatus === "collecting" || handoffDeferredForSkill) &&
+    (currentStatus === "collecting" || handoffDeferredForSkill || isLearnIntent) &&
     !shouldEscalate &&
     session.category &&
     config.llm.apiKey
@@ -813,11 +1025,12 @@ export async function processIntercomWebhook(payload) {
       );
 
       skillResult = await runSkillOrchestration({
-        category:     session.category,
+        category: session.category,
         latestUserMessage: event.latest_user_message,
         collectedSlots,
-        skillProfile:        workflowSkillProfile,       // workflow override (null = registry default)
-        workflowSourceProfile,                           // workflow source_config_json → allowedSources
+        authorName: event.author_name || null,
+        skillProfile: executionProfile.skillProfile,
+        sourcePriorityProfile: executionProfile.sourcePriorityProfile,
         ctx: { sessionUid, ...ctx }
       });
     } catch (err) {
@@ -927,6 +1140,57 @@ export async function processIntercomWebhook(payload) {
       ...ctx
     });
 
+  } else if (isLearnIntent) {
+    // learn intent: スキルが回答した場合はそのまま使用。
+    // 未回答の場合は次質問生成（スロット収集なし）にフォールバックする。
+    if (skillResult?.handled) {
+      replySourceCandidate = skillResult.answer_type;
+      let skillCandidateDetail = {};
+      try {
+        if (skillResult.answer_candidate_json) {
+          skillCandidateDetail = JSON.parse(skillResult.answer_candidate_json);
+        }
+      } catch { /* ignore */ }
+      answerCandidateJson = JSON.stringify({
+        answer_type: skillResult.answer_type,
+        answer_message: skillResult.answer_message,
+        sources: skillResult.sources ?? [],
+        confidence: skillResult.confidence,
+        reason: skillResult.reason,
+        retrieval_query: skillCandidateDetail.retrieval_query ?? null,
+        candidate_titles: skillCandidateDetail.candidate_titles ?? null,
+        candidate_chunk_ids: skillCandidateDetail.candidate_chunk_ids ?? null,
+        ask_slots: [],
+        next_message: null,
+        should_escalate: shouldEscalate,
+        reply_source_candidate: replySourceCandidate,
+        ...obsBase
+      });
+    } else {
+      // スキル未回答: 使い方の確認を促す1件の質問にフォールバック
+      replySourceCandidate = "next_message";
+      try {
+        const { candidateData } = await runNextQuestionGeneration(
+          sessionUid, session, event.latest_user_message, shouldEscalate, allSlots, ctx,
+          event.author_name || null, false, intentNLInstruction, conciergeToolContext,
+          globalPolicyInstruction, conversationHistorySummary
+        );
+        if (candidateData) {
+          answerCandidateJson = JSON.stringify({
+            answer_type: null,
+            answer_message: null,
+            sources: [],
+            confidence: null,
+            ...candidateData,
+            reply_source_candidate: replySourceCandidate,
+            ...obsBase
+          });
+        }
+      } catch (err) {
+        logger.warn("learn-intent fallback question generation failed", { sessionUid, error: err?.message, ...ctx });
+      }
+    }
+
   } else if (currentStatus === "collecting") {
     if (skillResult?.handled) {
       // skill orchestration で採用結果が出た場合
@@ -954,15 +1218,24 @@ export async function processIntercomWebhook(payload) {
         ...obsBase
       });
     } else if (skillResult?.soft_handled && skillResult?.soft_answer_message) {
-      // soft answer: 低信頼度の部分回答 + スロット質問を組み合わせる
+      // soft answer: 部分回答 (confidence 0.45〜0.64) + スロット質問を結合
       replySourceCandidate = "soft_answer";
+      const askSlots = selectAskSlots(session.category, allSlots);
+      const combinedMessage = buildSoftAnswerMessage(skillResult.soft_answer_message, askSlots);
+      logger.info("soft answer combined", {
+        sessionUid,
+        category: session.category,
+        soft_confidence: skillResult.soft_confidence,
+        ask_slots: askSlots,
+        ...ctx
+      });
       answerCandidateJson = JSON.stringify({
         answer_type: "soft_answer",
-        answer_message: skillResult.soft_answer_message,
+        answer_message: combinedMessage,
         sources: [],
-        confidence: skillResult.soft_confidence ?? 0,
-        selected_skill: skillResult.selected_skill ?? null,
-        ask_slots: [],
+        confidence: skillResult.soft_confidence,
+        reason: `soft_answer from ${skillResult.selected_skill}`,
+        ask_slots: askSlots,
         next_message: null,
         should_escalate: shouldEscalate,
         reply_source_candidate: replySourceCandidate,
@@ -973,8 +1246,7 @@ export async function processIntercomWebhook(payload) {
       try {
         const isFirstContact = messageOrder === 1 && ["ab_test_experience", "heatmap_analytics", "popup_event", "bug_report"].includes(session.category);
         const { candidateData } = await runNextQuestionGeneration(
-          sessionUid, session, event.latest_user_message, shouldEscalate, allSlots, ctx, intentOverride,
-          event.author_name || null, isFirstContact
+          sessionUid, session, event.latest_user_message, shouldEscalate, allSlots, ctx, event.author_name || null, isFirstContact, intentNLInstruction, conciergeToolContext, globalPolicyInstruction, conversationHistorySummary
         );
         if (candidateData) {
           replySourceCandidate = "next_message";
@@ -1097,22 +1369,16 @@ export async function processIntercomWebhook(payload) {
   }
 
   const finalSummaryJson = JSON.stringify({
-    category:            session.category,
-    status:              currentStatus,
+    category: session.category,
+    status: currentStatus,
     latest_user_message: event.latest_user_message?.slice(0, 200) ?? null,
-    selected_skill:      skillResult?.selected_skill ?? null,
-    reply_source:        replySource,
-    should_escalate:     shouldEscalate,
-    filled_slots_count:  filledSlotsCount,
+    selected_skill: skillResult?.selected_skill ?? null,
+    reply_source: replySource,
+    should_escalate: shouldEscalate,
+    filled_slots_count: filledSlotsCount,
     missing_slots_count: missingSlotNames.length,
-    decision_trace:      decisionTrace,
-    workflow_key:           workflowOverrides.workflowKey ?? null,
-    workflow_source:        workflowOverrides.workflowSource,
-    handoff_preset_applied: intentOverride?.handoff?.preset ?? resolveHandoffPreset(workflowOverrides.handoffConfig, session.category),
-    active_skill_order:     workflowSkillProfile?.orderOverrides?.[session.category] ?? null,
-    intent_override_applied: intentOverride !== null,
-    policy_override_applied: (workflowOverrides.policyConfig?.escalation_keywords?.length ?? 0) > 0,
-    recorded_at:         new Date().toISOString(),
+    decision_trace: decisionTrace,
+    recorded_at: new Date().toISOString(),
     ...handoffSummaryFields
   });
 
@@ -1146,19 +1412,7 @@ export async function processIntercomWebhook(payload) {
     return;
   }
 
-  // ── target 判定 + concierge 解決 ────────────────
-  const guardCtx = {
-    conversation_id: event.intercom_conversation_id,
-    contact_id: event.intercom_contact_id ?? null,
-    ...ctx
-  };
-  logger.info("test target evaluation started", guardCtx);
-
-  const targeting = await resolveTargetAndConcierge({
-    contactId: event.intercom_contact_id ?? null,
-    conversationId: event.intercom_conversation_id
-  });
-
+  // ── 12. reply 可否チェック (targeting は Step 5.5 で解決済み) ──────────
   if (!targeting.allowed) {
     const skipMsg = targeting.reason === "reply_disabled"
       ? "reply skipped (reply disabled)"
@@ -1173,7 +1427,7 @@ export async function processIntercomWebhook(payload) {
   }
 
   logger.info("test target matched", {
-    reason: targeting.reason,
+    reason:        targeting.reason,
     matched_type:  targeting.matchedType,
     matched_value: targeting.matchedValue,
     conversation_id: event.intercom_conversation_id,
@@ -1181,48 +1435,25 @@ export async function processIntercomWebhook(payload) {
     ...ctx
   });
 
-  logger.info("concierge resolved", {
-    concierge_key:    targeting.conciergeKey,
-    concierge_name:   targeting.conciergeName,
-    concierge_source: targeting.conciergeSource,
-    ...ctx
-  });
+  try {
+    await replyToConversation(event.intercom_conversation_id, replyMessage);
+    logger.info("reply success", { reply_source: replySource, ...ctx });
 
-  // concierge + targeting 情報を session に保存
-  if (sessionRowId) {
+    // bot 返信をメッセージ履歴に保存（会話履歴の両方向化）
     try {
-      await updateSession(sessionRowId, {
-        observabilityFields: {
-          concierge_key:       targeting.conciergeKey,
-          concierge_name:      targeting.conciergeName,
-          target_match_reason: targeting.targetMatchReason
-        }
+      const botMsgOrder = (await countMessagesBySessionUid(sessionUid)) + 1;
+      await createMessage({
+        sessionUid,
+        messageId: `bot-${event.intercom_message_id}`,
+        role: "bot",
+        messageText: replyMessage,
+        messageOrder: botMsgOrder,
+        createdAtTs: new Date().toISOString(),
+        rawPayloadJson: null
       });
     } catch (err) {
-      logger.warn("targeting: session concierge update failed", {
-        error: err?.message || String(err),
-        ...ctx
-      });
+      logger.warn("bot message save failed (non-fatal)", { sessionUid, error: err?.message, ...ctx });
     }
-  }
-
-  const conciergeAdminId = targeting.concierge?.intercom_admin_id ?? null;
-  const replyAdminId = conciergeAdminId || config.intercom.adminId;
-  const replyMode = targeting.concierge?.reply_mode ?? "reply";
-  logger.info("reply admin resolved", {
-    concierge_intercom_admin_id: conciergeAdminId,
-    env_admin_id: config.intercom.adminId,
-    using_admin_id: replyAdminId,
-    reply_mode: replyMode,
-    ...ctx
-  });
-  try {
-    if (replyMode === "note") {
-      await addNoteToConversation(event.intercom_conversation_id, replyMessage, replyAdminId);
-    } else {
-      await replyToConversation(event.intercom_conversation_id, replyMessage, replyAdminId);
-    }
-    logger.info("reply success", { reply_source: replySource, reply_mode: replyMode, admin_id: replyAdminId, category: session.category ?? null, concierge_key: targeting.conciergeKey ?? null, ...ctx });
 
     // handoff reply 成功 → handed_off に遷移
     if (replySource === "handoff") {
@@ -1232,8 +1463,6 @@ export async function processIntercomWebhook(payload) {
   } catch (err) {
     logger.warn("reply failed", {
       reply_source: replySource,
-      category: session.category ?? null,
-      concierge_key: targeting.conciergeKey ?? null,
       error: err?.message || String(err),
       ...ctx
     });

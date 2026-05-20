@@ -1436,13 +1436,14 @@ export async function processIntercomWebhook(payload) {
   });
 
   const replyMode = targeting.concierge?.reply_mode ?? "reply";
+  const conciergeAdminId = targeting.concierge?.intercom_admin_id ?? null;
   try {
     if (replyMode === "note") {
-      await addNoteToConversation(event.intercom_conversation_id, replyMessage);
-      logger.info("note added (memo mode)", { reply_source: replySource, ...ctx });
+      await addNoteToConversation(event.intercom_conversation_id, replyMessage, conciergeAdminId);
+      logger.info("note added (memo mode)", { reply_source: replySource, admin_id: conciergeAdminId, ...ctx });
     } else {
-      await replyToConversation(event.intercom_conversation_id, replyMessage);
-      logger.info("reply success", { reply_source: replySource, ...ctx });
+      await replyToConversation(event.intercom_conversation_id, replyMessage, conciergeAdminId);
+      logger.info("reply success", { reply_source: replySource, admin_id: conciergeAdminId, ...ctx });
     }
 
     // bot 返信をメッセージ履歴に保存（会話履歴の両方向化）

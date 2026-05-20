@@ -32,7 +32,7 @@ async function chat(messages) {
   return extractJson(content);
 }
 
-export async function classifyCategory({ latestUserMessage, categoryCandidates, categoryDefinitions }) {
+export async function classifyCategory({ latestUserMessage, categoryCandidates, categoryDefinitions = null }) {
   const policyBundle = loadPolicyBundle();
   const prompt = loadPrompt("prompts/classifier_prompt.md");
   const userPayload = { latest_user_message: latestUserMessage, category_candidates: categoryCandidates };

@@ -18,6 +18,11 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // Vercel cron は Bearer トークンで認証するため Basic Auth をスキップ
+  if (req.nextUrl.pathname.startsWith("/api/cron/")) {
+    return NextResponse.next();
+  }
+
   // ADMIN_PASSWORD が未設定の場合はローカル開発とみなして通過
   const password = process.env.ADMIN_PASSWORD;
   if (!password) return NextResponse.next();

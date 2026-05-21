@@ -124,6 +124,12 @@ export function extractIntercomEvent(payload) {
     payload?.contact?.id ||
     null;
 
+  // ── intercom_contact_email ────────────────────
+  const intercom_contact_email =
+    item?.source?.author?.email ||
+    item?.conversation_message?.author?.email ||
+    null;
+
   // ── created_at_ts ─────────────────────────────
   const created_at_ts =
     source?.created_at ||
@@ -136,6 +142,7 @@ export function extractIntercomEvent(payload) {
     intercom_conversation_id: intercom_conversation_id ? String(intercom_conversation_id) : null,
     intercom_message_id,
     intercom_contact_id: intercom_contact_id ? String(intercom_contact_id) : null,
+    intercom_contact_email: intercom_contact_email || null,
     latest_user_message,
     created_at_ts,
     author_type,

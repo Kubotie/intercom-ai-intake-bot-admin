@@ -169,4 +169,5 @@ export async function enrichContactFromUrl(contactId, pageUrl) {
       error: err.message
     });
   }
+  return attrs;
 }

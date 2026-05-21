@@ -541,13 +541,15 @@ export async function processIntercomWebhook(payload) {
   // source.url から Ptengine project_id を抽出し、
   // Metabase CSV を参照してコンタクトの Session_Package_type / Session_Project_domain を更新する。
   // 失敗しても後続処理には影響しない。
+  let enrichedAttrs = null;
   if (event.event_topic === "conversation.user.created" && event.intercom_contact_id) {
     const sourceUrl = rawSrc?.url ?? null;
     logger.info("project-enrichment: source url", { sourceUrl, contact_id: event.intercom_contact_id, ...ctx });
     if (sourceUrl) {
-      await enrichContactFromUrl(event.intercom_contact_id, sourceUrl).catch(err =>
-        logger.warn("project-enrichment failed (non-fatal)", { error: err?.message, ...ctx })
-      );
+      enrichedAttrs = await enrichContactFromUrl(event.intercom_contact_id, sourceUrl).catch(err => {
+        logger.warn("project-enrichment failed (non-fatal)", { error: err?.message, ...ctx });
+        return null;
+      });
     } else {
       logger.info("project-enrichment: skipped (no source url)", ctx);
     }
@@ -626,7 +628,10 @@ export async function processIntercomWebhook(payload) {
   //
   const targeting = await resolveTargetAndConcierge({
     contactId:      event.intercom_contact_id ?? null,
-    conversationId: event.intercom_conversation_id
+    conversationId: event.intercom_conversation_id,
+    contactEmail:   event.intercom_contact_email ?? null,
+    contactPlan:    enrichedAttrs?.Session_Package_type ?? null,
+    contactDomain:  enrichedAttrs?.Session_Project_domain ?? null,
   });
   const executionProfile = resolveExecutionProfile(targeting.concierge);
 

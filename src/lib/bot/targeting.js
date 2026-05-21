@@ -77,7 +77,7 @@ function envMatches(targetEnv) {
  *   targetMatchReason: string|null    // reason の別名 (session 保存用)
  * }>}
  */
-export async function resolveTargetAndConcierge({ contactId, conversationId }) {
+export async function resolveTargetAndConcierge({ contactId, conversationId, contactEmail = null, contactPlan = null, contactDomain = null }) {
   const deny = (reason) => ({
     allowed: false, reason,
     matchedTarget: null, matchedType: null, matchedValue: null,
@@ -125,7 +125,24 @@ export async function resolveTargetAndConcierge({ contactId, conversationId }) {
           nocoReason = "nocodb_conversation";
           break;
         }
-        // email / domain / plan / company: Intercom 連絡先属性が必要 → 次フェーズで対応
+        if (type === "plan" && contactPlan && String(contactPlan).toUpperCase() === value.toUpperCase()) {
+          matchedTarget = t;
+          nocoReason = "nocodb_plan";
+          break;
+        }
+        if (type === "email" && contactEmail && String(contactEmail).toLowerCase() === value.toLowerCase()) {
+          matchedTarget = t;
+          nocoReason = "nocodb_email";
+          break;
+        }
+        if (type === "domain" && contactEmail) {
+          const emailDomain = contactEmail.split("@")[1]?.toLowerCase() ?? "";
+          if (emailDomain && emailDomain === value.toLowerCase()) {
+            matchedTarget = t;
+            nocoReason = "nocodb_domain";
+            break;
+          }
+        }
       }
     } catch (err) {
       logger.warn("targeting: test_targets lookup failed, env allowlist only", {

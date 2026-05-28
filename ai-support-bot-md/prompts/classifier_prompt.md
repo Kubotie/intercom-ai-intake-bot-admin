@@ -17,7 +17,7 @@
 
 ## 分類優先順位
 
-billing_contract > login_account > experience_issue > tracking_issue > bug_report > usage_guidance
+billing_contract > login_account > experience_issue > tracking_issue > bug_report > report_difference > usage_guidance
 
 ## 境界判定のポイント
 
@@ -27,6 +27,8 @@ billing_contract > login_account > experience_issue > tracking_issue > bug_repor
 - 「解約したい」は billing_contract（怒りを伴っても billing_contract で収集してから handoff）
 - 「できない」「動かない」は usage_guidance ではなく experience_issue か bug_report を検討
 - 「プレビューで確認したい」「設定の仕方がわからない」は experience_issue か usage_guidance → 体験関連なら **experience_issue**
+- **「GA4と数値が違う」「どちらのデータが正しいか」「なぜPtengineとGA4で差異があるか」は report_difference**（集計方法の質問形式でも数値差異の文脈なら report_difference）
+- 「どのように集計しているか」が**GA4・他ツールとの比較・差異の文脈**で使われている場合は **report_difference**（単独で使い方を聞く場合は usage_guidance）
 
 ---
 
@@ -127,6 +129,32 @@ billing_contract > login_account > experience_issue > tracking_issue > bug_repor
   "sentiment": "frustrated",
   "confidence": 0.94,
   "reason": "体験が表示されない→troubleshoot。明日キャンペーン→urgency:high"
+}
+```
+
+**例6（report_difference と usage_guidance の境界）**
+入力: 「Insight > ダイジェスト > 地域（訪問数）にて、Maharashtra からのアクセスが多く表示されているのですが、弊社側のGA4では該当データを確認できておりません。こちらについて、どのような方法・データソースで集計されているかご教示いただくことは可能でしょうか。」
+```json
+{
+  "category": "report_difference",
+  "action_intent": "learn",
+  "urgency": "normal",
+  "sentiment": "neutral",
+  "confidence": 0.88,
+  "reason": "GA4との地域データ差異を報告し、原因を知りたい→report_difference。「集計方法を教えて」という形式でも文脈は数値乖離の調査"
+}
+```
+
+**例7（report_difference：集計差異 + 原因把握）**
+入力: 「PtengineのInsightで表示される訪問数がGoogle Analyticsの数値と大きく異なります。どちらが正しいのでしょうか」
+```json
+{
+  "category": "report_difference",
+  "action_intent": "verify",
+  "urgency": "normal",
+  "sentiment": "neutral",
+  "confidence": 0.92,
+  "reason": "PtengineとGA4の数値差異の確認→report_difference。「どちらが正しいか」→verify"
 }
 ```
 

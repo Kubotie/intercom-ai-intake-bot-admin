@@ -4,8 +4,8 @@ import {
   createSession,
   createSlot,
   countMessagesBySessionUid,
-  findMessageByIntercomMessageId,
   findSessionByConversationId,
+  isDuplicateKeyError,
   listMessagesBySessionUid,
   listSlotsBySessionUid,
   updateSession,
@@ -28,6 +28,8 @@ import { runSkillOrchestration } from "./skills/orchestrator.js";
 import { buildHandoffSummary } from "./handoff-summary.js";
 import { resolveExecutionProfile } from "./concierge-profiles.js";
 import { enrichContactFromUrl } from "./project-enrichment.js";
+import { runAgenticTroubleshootLoop } from "./agentic-slot-loop.js";
+import { generateAnswerCandidatesForNote } from "./note-candidates.js";
 
 // ─────────────────────────────────────────────
 // self-reply loop prevention (2段構え)
@@ -39,7 +41,7 @@ const FALLBACK_CATEGORY = "usage_guidance";
 
 // knowledge-first intents: handoff より前に FAQ / Help Center skill を試す
 // これらは情報収集よりも「答えを出す」ことが優先される intent
-const KNOWLEDGE_FIRST_CATEGORIES = new Set(["usage_guidance", "ab_test_experience", "heatmap_analytics", "popup_event", "customization_integration"]);
+const KNOWLEDGE_FIRST_CATEGORIES = new Set(["usage_guidance", "ab_test_experience", "heatmap_analytics", "popup_event", "customization_integration", "report_difference"]);
 
 // エスカレーション判定キーワードのデフォルト値。
 // 実行時は executionProfile.policyProfile.escalationKeywords で上書きされる。
@@ -119,6 +121,35 @@ function resolveEscalationReason(message, keywords = DEFAULT_ESCALATION_KEYWORDS
   const triggered = keywords.filter((kw) => message.includes(kw));
   if (triggered.length === 0) return null;
   return triggered.map((kw) => `keyword:${kw}`).join(", ");
+}
+
+// ─────────────────────────────────────────────
+// メッセージ内容判定（note 候補生成のスキップ制御）
+// ─────────────────────────────────────────────
+
+/** 締め言葉（クロージング）判定 */
+function isClosingMessage(text) {
+  const clean = String(text || "").trim();
+  if (!clean) return false;
+  if (/[?？]|でしょうか|ですか|教えて|確認し|どのよう/.test(clean)) return false;
+  if (/^(解消|解決)(し(まし)?た|です)[。！\s]*$/.test(clean)) return true;
+  if (/ありがとうございまし?た/.test(clean)) return true;
+  return false;
+}
+
+/** セッション全ユーザーメッセージを結合してnote候補用クエリを組み立てる */
+async function buildNoteQueryContext(sessionUid, latestUserMessage) {
+  try {
+    const msgs = await listMessagesBySessionUid(sessionUid, 20);
+    const userTexts = msgs
+      .filter(m => m.role === "user")
+      .sort((a, b) => (a.message_order ?? 0) - (b.message_order ?? 0))
+      .map(m => String(m.message_text ?? "").trim())
+      .filter(t => t.length > 3);
+    return userTexts.length > 0 ? userTexts.join("\n") : latestUserMessage;
+  } catch {
+    return latestUserMessage;
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -524,18 +555,7 @@ export async function processIntercomWebhook(payload) {
     return;
   }
 
-  // ── 4. 重複チェック (message_id ベース) ─────
-  // 同一 message_id なら Intercom の retry または二重配信と判断してスキップする。
-  // conversation.user.created (1ターン目) と conversation.user.replied (2ターン目以降) は
-  // 異なる message_id を持つため、replied は正常に処理される。
-  const duplicate = await findMessageByIntercomMessageId(event.intercom_message_id);
-  if (duplicate) {
-    logger.info("duplicate message skipped", {
-      ...ctx,
-      is_retry_candidate: event.event_topic === "conversation.user.created"
-    });
-    return;
-  }
+  // ── 4. 重複チェックは Step 6 の createMessage で UNIQUE 制約によりアトミックに行う ──
 
   // ── 4.5. project enrichment (conversation.user.created のみ) ──────────
   // source.url から Ptengine project_id を抽出し、
@@ -665,16 +685,83 @@ export async function processIntercomWebhook(payload) {
 
   // ── 6. message 保存 ─────────────────────────
   const messageOrder = (await countMessagesBySessionUid(sessionUid)) + 1;
-  await createMessage({
-    sessionUid,
-    messageId: event.intercom_message_id,
-    role: "user",
-    messageText: event.latest_user_message,
-    messageOrder,
-    createdAtTs: isoFromUnix(event.created_at_ts),
-    rawPayloadJson: event.raw_payload_json
-  });
-  logger.info("message inserted", { sessionUid, messageOrder, ...ctx });
+  try {
+    await createMessage({
+      sessionUid,
+      messageId: event.intercom_message_id,
+      role: "user",
+      messageText: event.latest_user_message,
+      messageOrder,
+      createdAtTs: isoFromUnix(event.created_at_ts),
+      rawPayloadJson: event.raw_payload_json
+    });
+    logger.info("message inserted", { sessionUid, messageOrder, ...ctx });
+  } catch (err) {
+    if (isDuplicateKeyError(err)) {
+      logger.info("duplicate message skipped (unique constraint)", {
+        ...ctx,
+        is_retry_candidate: event.event_topic === "conversation.user.created"
+      });
+      return;
+    }
+    throw err;
+  }
+
+  // ── 6.3. デバウンス: bot 未返信の連続メッセージを結合してから処理する ──
+  //
+  // ユーザーが意図を複数メッセージに分けて送信した場合（例: 前提1件 + 質問1件）に
+  // 正確な意図把握ができないため、一定時間待機して後続メッセージと結合する。
+  //
+  // アルゴリズム:
+  //   1. DEBOUNCE_WAIT_MS 待機（後続メッセージが NocoDB に保存されるのを待つ）
+  //   2. セッションの全メッセージを再取得し「bot返信なしの連続ユーザーメッセージ」を検出
+  //   3. 現在のメッセージが最新でなければ → yield して重複処理を防ぐ
+  //   4. 最新かつバッチが2件以上 → event.latest_user_message を結合メッセージで上書き
+  //
+  const DEBOUNCE_WAIT_MS = 4000;
+  await new Promise(resolve => setTimeout(resolve, DEBOUNCE_WAIT_MS));
+
+  try {
+    const sessionMsgs = await listMessagesBySessionUid(sessionUid, 30);
+    const userMsgs = sessionMsgs
+      .filter(m => m.role === "user")
+      .sort((a, b) => (a.message_order ?? 0) - (b.message_order ?? 0));
+
+    // このメッセージが最新でなければ、新しいメッセージの処理に任せて終了する
+    const latestUserMsg = userMsgs[userMsgs.length - 1];
+    if (latestUserMsg?.intercom_message_id !== event.intercom_message_id) {
+      logger.info("debounce: yielding to newer message", {
+        this_order:   messageOrder,
+        latest_order: latestUserMsg?.message_order,
+        ...ctx
+      });
+      return;
+    }
+
+    // 最後の bot 返信以降に届いたユーザーメッセージ群を特定する
+    const botOrders = sessionMsgs
+      .filter(m => m.role === "bot")
+      .map(m => m.message_order ?? 0);
+    const lastBotOrder = botOrders.length > 0 ? Math.max(...botOrders) : 0;
+    const batchMsgs = userMsgs.filter(m => (m.message_order ?? 0) > lastBotOrder);
+
+    if (batchMsgs.length > 1) {
+      const combined = batchMsgs
+        .map(m => String(m.message_text ?? "").trim())
+        .filter(Boolean)
+        .join("\n");
+      logger.info("debounce: combined consecutive messages", {
+        batch_size:      batchMsgs.length,
+        last_bot_order:  lastBotOrder,
+        combined_length: combined.length,
+        ...ctx
+      });
+      // 以降の LLM 処理がすべて結合メッセージを参照するよう in-place 上書きする
+      event.latest_user_message = combined;
+    }
+  } catch (err) {
+    logger.warn("debounce batch detection failed (non-fatal)", { error: err?.message, ...ctx });
+  }
 
   // ── 6.5. 会話履歴サマリー構築 ─────────────────────────────────────
   // 直近 5 件のユーザーメッセージ（今回分を除く）を LLM コンテキスト用に整形する。
@@ -782,20 +869,49 @@ export async function processIntercomWebhook(payload) {
       });
     }
   } else {
-    // 通常の継続ターン: 再分類はしないが毎ターン action_intent を判定してログ
+    // 通常の継続ターン: 毎ターン分類を実行し、カテゴリが変わっていればトピック切替も行う
     const result = await runClassification(
       event.latest_user_message, { sessionUid, continuing_turn: true, ...ctx }
     );
     actionIntent = result.actionIntent;
     urgency      = result.urgency;
     sentiment    = result.sentiment;
-    await updateSession(sessionRowId, {
-      observabilityFields: { action_intent: actionIntent, urgency, sentiment }
-    });
+    if (result.category && result.category !== session.category && result.confidence >= 0.75) {
+      logger.info("topic change detected via classification (no keyword) — switching category", {
+        sessionUid,
+        previous_category: session.category,
+        new_category:      result.category,
+        confidence:        result.confidence,
+        ...ctx
+      });
+      const existingSlots = await listSlotsBySessionUid(sessionUid);
+      for (const slot of existingSlots.filter(s => s.is_required)) {
+        await updateSlot(slot.Id, { isRequired: false });
+      }
+      await updateSession(sessionRowId, {
+        category: result.category,
+        status: "collecting",
+        observabilityFields: { action_intent: actionIntent, urgency, sentiment }
+      });
+      session       = { ...session, category: result.category };
+      currentStatus = "collecting";
+      if (actionIntent !== "learn") {
+        await initRequiredSlots(sessionUid, result.category, ctx);
+      }
+    } else {
+      await updateSession(sessionRowId, {
+        observabilityFields: { action_intent: actionIntent, urgency, sentiment }
+      });
+    }
   }
 
   // learn: FAQへ即答するため症状スロット収集をスキップするフラグ
-  const isLearnIntent = actionIntent === "learn";
+  const isLearnIntent        = actionIntent === "learn";
+  const isTroubleshootIntent = actionIntent === "troubleshoot";
+
+  // Agentic Slot Loop の結果 (troubleshoot intent 時に Step 9 で設定)
+  // null の場合はレガシー（ルールベース）フローで継続する
+  let agenticResult = null;
 
   logger.info("action intent resolved", {
     sessionUid,
@@ -884,9 +1000,54 @@ export async function processIntercomWebhook(payload) {
 
   // ── 9. slot 抽出 ─────────────────────────────
   // learn intent: FAQ/HC への即答を優先するためスロット収集をスキップ
+  // troubleshoot intent: Agentic Loop が抽出・ハンドオフ判定・動的スロット生成を一括処理
   // handed_off 後も slot の保存は継続する
   if (isLearnIntent) {
     logger.info("slot extraction skipped (learn intent)", { sessionUid, category: session.category, ...ctx });
+  } else if (
+    isTroubleshootIntent &&
+    !shouldEscalate &&
+    currentStatus !== "handed_off" &&
+    config.llm.apiKey &&
+    session.category
+  ) {
+    // Agentic Slot Loop を実行 (スロット抽出 + ハンドオフ判定 + 動的スロット生成の 1 shot)
+    // Step 9b の listSlotsBySessionUid() で更新後の allSlots を再取得するため、
+    // ここでは NocoDB 更新のみ行い handoff 判定は Step 9b に委ねる。
+    logger.info("agentic slot loop started (troubleshoot intent)", {
+      sessionUid,
+      category: session.category,
+      ...ctx
+    });
+    agenticResult = await runAgenticTroubleshootLoop({
+      sessionUid,
+      session,
+      event,
+      allSlots: await listSlotsBySessionUid(sessionUid), // 最新スロット状態を渡す
+      conversationHistorySummary,
+      nlInstruction:           await getIntentNLInstruction(session.category).catch(() => null),
+      globalPolicyInstruction: globalPolicyInstruction, // Step 8c でロード済み
+      sentiment,               // 分類フェーズで取得した感情 ("frustrated"|"neutral"|"positive")
+      customerName:            event.author_name || null,
+      ctx,
+    });
+    if (agenticResult) {
+      logger.info("agentic slot loop completed", {
+        sessionUid,
+        category: session.category,
+        is_handoff_ready: agenticResult.is_handoff_ready,
+        next_action:      agenticResult.next_action,
+        customer_phase:   agenticResult.customer_phase,
+        dynamic_to_ask:   agenticResult.dynamic_slots_to_ask.length,
+        ...ctx
+      });
+    } else {
+      // LLM 失敗 → レガシー抽出にフォールバック
+      logger.warn("agentic slot loop returned null, falling back to legacy slot extraction", {
+        sessionUid, ...ctx
+      });
+      await runSlotExtraction(sessionUid, session.category, event.latest_user_message, ctx);
+    }
   } else if (config.llm.apiKey && session.category) {
     await runSlotExtraction(sessionUid, session.category, event.latest_user_message, ctx);
   } else if (!config.llm.apiKey) {
@@ -931,24 +1092,52 @@ export async function processIntercomWebhook(payload) {
     if (currentStatus === "collecting" && !isLearnIntent) {
       // NL 指示が設定されていれば LLM で評価、なければルールベース
       // learn intent: スロット収集もハンドオフ評価もスキップしてスキルへ直行
-      intentNLInstruction = await getIntentNLInstruction(session.category).catch(() => null);
-      const nlInstruction = intentNLInstruction;
-      const handoffEval = await isReadyForHandoffNL(
-        session.category, allSlots, nlInstruction, event.latest_user_message
-      );
-      const ready = handoffEval.ready;
+      // troubleshoot + agentic: agenticResult.is_handoff_ready を使い isReadyForHandoffNL をスキップ
 
-      logger.info("handoff eval source", {
-        sessionUid,
-        category: session.category,
-        source: handoffEval.source,
-        nl_instruction_set: !!nlInstruction,
-        ...ctx
-      });
+      let ready = false;
+      let handoffEvalSource = "rule_based";
+
+      if (agenticResult) {
+        // Agentic Loop の判定を信頼する (ルールベース評価は不要)
+        ready = agenticResult.is_handoff_ready || agenticResult.next_action === "handoff_to_human";
+        handoffEvalSource = "agentic_loop";
+        intentNLInstruction = null; // agentic loop 内で既に考慮済み
+
+        logger.info("handoff eval source", {
+          sessionUid,
+          category: session.category,
+          source: handoffEvalSource,
+          is_handoff_ready: agenticResult.is_handoff_ready,
+          next_action: agenticResult.next_action,
+          ...ctx
+        });
+      } else {
+        // レガシーフロー: NL 指示またはルールベースで評価
+        intentNLInstruction = await getIntentNLInstruction(session.category).catch(() => null);
+        const handoffEval = await isReadyForHandoffNL(
+          session.category, allSlots, intentNLInstruction, event.latest_user_message
+        );
+        ready = handoffEval.ready;
+        handoffEvalSource = handoffEval.source;
+
+        logger.info("handoff eval source", {
+          sessionUid,
+          category: session.category,
+          source: handoffEvalSource,
+          nl_instruction_set: !!intentNLInstruction,
+          ...ctx
+        });
+
+        if (ready) {
+          handoffReason = handoffEval.reason || resolveHandoffReason(session.category, allSlots);
+        }
+      }
+
+      if (agenticResult && ready) {
+        handoffReason = agenticResult.reasoning ?? "agentic_handoff_ready";
+      }
 
       if (ready) {
-        handoffReason = handoffEval.reason || resolveHandoffReason(session.category, allSlots);
-
         if (KNOWLEDGE_FIRST_CATEGORIES.has(session.category)) {
           // knowledge-first: skill を試してから handoff 判断する
           handoffDeferredForSkill = true;
@@ -958,7 +1147,7 @@ export async function processIntercomWebhook(payload) {
             filled_slots: filledSlotNames,
             missing_slots: missingSlotNames,
             handoff_reason: handoffReason,
-            handoff_eval_source: handoffEval.source,
+            handoff_eval_source: handoffEvalSource,
             ...ctx
           });
         } else {
@@ -970,7 +1159,7 @@ export async function processIntercomWebhook(payload) {
             filled_slots_count: filledSlotsCount,
             missing_slots_count: missingSlotNames.length,
             handoff_reason: handoffReason,
-            handoff_eval_source: handoffEval.source,
+            handoff_eval_source: handoffEvalSource,
             ...ctx
           });
           logger.info("handoff reason resolved", {
@@ -1172,28 +1361,24 @@ export async function processIntercomWebhook(payload) {
         ...obsBase
       });
     } else {
-      // スキル未回答: 使い方の確認を促す1件の質問にフォールバック
-      replySourceCandidate = "next_message";
-      try {
-        const { candidateData } = await runNextQuestionGeneration(
-          sessionUid, session, event.latest_user_message, shouldEscalate, allSlots, ctx,
-          event.author_name || null, false, intentNLInstruction, conciergeToolContext,
-          globalPolicyInstruction, conversationHistorySummary
-        );
-        if (candidateData) {
-          answerCandidateJson = JSON.stringify({
-            answer_type: null,
-            answer_message: null,
-            sources: [],
-            confidence: null,
-            ...candidateData,
-            reply_source_candidate: replySourceCandidate,
-            ...obsBase
-          });
-        }
-      } catch (err) {
-        logger.warn("learn-intent fallback question generation failed", { sessionUid, error: err?.message, ...ctx });
-      }
+      // スキル未回答: スロットが0件なので next_message に落とすと「必要な情報がすべて揃いました。」に
+      // なってしまう。代わりに ready_for_handoff へ遷移して担当者引き継ぎメッセージを返す。
+      logger.info("learn-intent: all skills rejected, routing to handoff", { sessionUid, ...ctx });
+      currentStatus = "ready_for_handoff";
+      await updateSession(sessionRowId, { status: currentStatus, shouldEscalate });
+      replySourceCandidate = "handoff";
+      answerCandidateJson = JSON.stringify({
+        answer_type: null,
+        answer_message: null,
+        sources: [],
+        confidence: null,
+        ask_slots: [],
+        next_message: null,
+        should_escalate: shouldEscalate,
+        reason: "learn_intent_unanswered",
+        reply_source_candidate: replySourceCandidate,
+        ...obsBase
+      });
     }
 
   } else if (currentStatus === "collecting") {
@@ -1248,38 +1433,71 @@ export async function processIntercomWebhook(payload) {
       });
     } else {
       // 次質問生成 (skill 不採用またはカテゴリに skill なし)
-      try {
-        const isFirstContact = messageOrder === 1 && ["ab_test_experience", "heatmap_analytics", "popup_event", "bug_report"].includes(session.category);
-        const { candidateData } = await runNextQuestionGeneration(
-          sessionUid, session, event.latest_user_message, shouldEscalate, allSlots, ctx, event.author_name || null, isFirstContact, intentNLInstruction, conciergeToolContext, globalPolicyInstruction, conversationHistorySummary
-        );
-        if (candidateData) {
-          replySourceCandidate = "next_message";
-          answerCandidateJson = JSON.stringify({
-            answer_type: null,
-            answer_message: null,
-            sources: [],
-            confidence: null,
-            ...candidateData,
-            reply_source_candidate: replySourceCandidate,
-            ...obsBase
-          });
-        }
-      } catch (err) {
-        logger.warn("next question generation error, continuing with fallback reply", {
+      //
+      // troubleshoot + agentic: dynamic_slots_to_ask を question_text として使う
+      // それ以外: runNextQuestionGeneration() で LLM 生成
+      if (agenticResult && agenticResult.next_action === "ask_user") {
+        replySourceCandidate = "next_message";
+        const dynamicQ      = agenticResult.dynamic_slots_to_ask;
+        // LLM 生成の完成文を優先。生成されていなければ question_text の結合にフォールバック
+        const nextMessage   = agenticResult.final_output_text
+          ?? (dynamicQ.length > 0 ? dynamicQ.map((d) => d.question_text).join("\n\n") : null);
+        answerCandidateJson = JSON.stringify({
+          answer_type: null,
+          answer_message: null,
+          sources: [],
+          confidence: null,
+          ask_slots: dynamicQ.map((d) => d.slot_name),
+          next_message: nextMessage,
+          should_escalate: shouldEscalate,
+          reason: agenticResult.reasoning ?? "agentic_dynamic_question",
+          reply_source_candidate: replySourceCandidate,
+          ...obsBase
+        });
+        logger.info("agentic dynamic question selected", {
           sessionUid,
-          error: err?.message,
+          category: session.category,
+          ask_slots: dynamicQ.map((d) => d.slot_name),
+          has_final_output_text: Boolean(agenticResult.final_output_text),
           ...ctx
         });
+      } else {
+        try {
+          const isFirstContact = messageOrder === 1 && ["ab_test_experience", "heatmap_analytics", "popup_event", "bug_report"].includes(session.category);
+          const { candidateData } = await runNextQuestionGeneration(
+            sessionUid, session, event.latest_user_message, shouldEscalate, allSlots, ctx, event.author_name || null, isFirstContact, intentNLInstruction, conciergeToolContext, globalPolicyInstruction, conversationHistorySummary
+          );
+          if (candidateData) {
+            replySourceCandidate = "next_message";
+            answerCandidateJson = JSON.stringify({
+              answer_type: null,
+              answer_message: null,
+              sources: [],
+              confidence: null,
+              ...candidateData,
+              reply_source_candidate: replySourceCandidate,
+              ...obsBase
+            });
+          }
+        } catch (err) {
+          logger.warn("next question generation error, continuing with fallback reply", {
+            sessionUid,
+            error: err?.message,
+            ...ctx
+          });
+        }
       }
     }
 
   } else if (currentStatus === "ready_for_handoff") {
     // handoff メタデータを answer_candidate_json に保存する
-    replySourceCandidate = "handoff";
+    // agentic loop が final_output_text を生成した場合: answer_type="agentic_message" として
+    // reply-resolver の hasSkillAnswer (priority 2) に捕捉させ、固定 buildHandoffReply より優先する
+    const agenticHandoffText = agenticResult?.final_output_text ?? null;
+    replySourceCandidate = agenticHandoffText ? "agentic_message" : "handoff";
     answerCandidateJson = JSON.stringify({
-      answer_type: null,
-      answer_message: null,
+      answer_type:    agenticHandoffText ? "agentic_message" : null,
+      answer_message: agenticHandoffText ?? null,
       sources: [],
       confidence: null,
       ask_slots: [],
@@ -1288,6 +1506,14 @@ export async function processIntercomWebhook(payload) {
       reply_source_candidate: replySourceCandidate,
       ...obsBase
     });
+    if (agenticHandoffText) {
+      logger.info("agentic handoff message selected", {
+        sessionUid,
+        category: session.category,
+        has_final_output_text: true,
+        ...ctx
+      });
+    }
   }
 
   // answer_candidate_json を保存 (collecting / ready_for_handoff)
@@ -1444,8 +1670,57 @@ export async function processIntercomWebhook(payload) {
   const conciergeAdminId = targeting.concierge?.intercom_admin_id ?? null;
   try {
     if (replyMode === "note") {
-      await addNoteToConversation(event.intercom_conversation_id, replyMessage, conciergeAdminId);
-      logger.info("note added (memo mode)", { reply_source: replySource, admin_id: conciergeAdminId, ...ctx });
+      // スキル情報・参照元をノートのフッターに添付する
+      let noteSources = [];
+      try {
+        const cand = typeof answerCandidateJson === "string"
+          ? JSON.parse(answerCandidateJson)
+          : answerCandidateJson;
+        noteSources = Array.isArray(cand?.sources) ? cand.sources : [];
+      } catch {}
+      const noteCandidates = Array.isArray(skillResult?.candidate_results)
+        ? skillResult.candidate_results
+        : [];
+
+      // ナレッジから複数の回答候補を生成して担当者の選択肢を提示する
+      let noteCandidateResult = null;
+      const isClosing = isClosingMessage(event.latest_user_message || "");
+      if (session.category && config.llm.apiKey && !isClosing) {
+        const sessionContext = await buildNoteQueryContext(sessionUid, event.latest_user_message);
+        try {
+          noteCandidateResult = await generateAnswerCandidatesForNote({
+            category: session.category,
+            latestUserMessage: sessionContext,
+            collectedSlots: Object.fromEntries(
+              allSlots.filter(isFilledSlot).map(s => [s.slot_name, s.slot_value])
+            ),
+            authorName: event.author_name || null,
+          });
+          logger.info("note candidates generated", {
+            count: noteCandidateResult?.candidates?.length ?? 0,
+            branch_axis: noteCandidateResult?.branchAxis,
+            ...ctx
+          });
+        } catch (err) {
+          logger.warn("note candidates generation failed (non-fatal)", { error: err?.message, ...ctx });
+        }
+      }
+
+      await addNoteToConversation(
+        event.intercom_conversation_id,
+        replyMessage,
+        conciergeAdminId,
+        { replySource, sources: noteSources, candidateResults: noteCandidates },
+        noteCandidateResult
+      );
+      logger.info("note added (memo mode)", {
+        reply_source: replySource,
+        sources_count: noteSources.length,
+        skill_candidates: noteCandidates.map((c) => c.skill_name),
+        answer_candidates_count: noteCandidateResult?.candidates?.length ?? 0,
+        admin_id: conciergeAdminId,
+        ...ctx
+      });
     } else {
       await replyToConversation(event.intercom_conversation_id, replyMessage, conciergeAdminId);
       logger.info("reply success", { reply_source: replySource, admin_id: conciergeAdminId, ...ctx });

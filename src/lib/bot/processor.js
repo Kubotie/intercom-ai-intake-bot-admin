@@ -4,6 +4,7 @@ import {
   createSession,
   createSlot,
   countMessagesBySessionUid,
+  findMessageByIntercomMessageId,
   findSessionByConversationId,
   isDuplicateKeyError,
   listMessagesBySessionUid,
@@ -1668,6 +1669,36 @@ export async function processIntercomWebhook(payload) {
 
   const replyMode = targeting.concierge?.reply_mode ?? "reply";
   const conciergeAdminId = targeting.concierge?.intercom_admin_id ?? null;
+
+  // ── duplicate webhook guard (2 重チェック) ────────────────────────────
+  // Step 4 の事前チェックはメッセージ未保存時の競合を防ぎきれないため、
+  // ノート/返信投稿直前にも bot 返信レコードの存在を確認する。
+  const existingBotMsg = await findMessageByIntercomMessageId(`bot-${event.intercom_message_id}`).catch(() => null);
+  if (existingBotMsg) {
+    logger.info("note/reply skipped: bot reply already recorded (duplicate webhook guard)", { ...ctx });
+    return;
+  }
+  // bot 返信を先行保存してべき等性ガードとする。
+  // NocoDB の unique 制約が有効なら 2 件目がここで弾かれる。
+  try {
+    const botMsgOrder = (await countMessagesBySessionUid(sessionUid)) + 1;
+    await createMessage({
+      sessionUid,
+      messageId: `bot-${event.intercom_message_id}`,
+      role: "bot",
+      messageText: replyMessage,
+      messageOrder: botMsgOrder,
+      createdAtTs: new Date().toISOString(),
+      rawPayloadJson: null
+    });
+  } catch (err) {
+    if (isDuplicateKeyError(err)) {
+      logger.info("note/reply skipped: bot message pre-save duplicate (duplicate webhook guard)", { ...ctx });
+      return;
+    }
+    logger.warn("bot message pre-save failed (non-fatal, continuing)", { sessionUid, error: err?.message, ...ctx });
+  }
+
   try {
     if (replyMode === "note") {
       // スキル情報・参照元をノートのフッターに添付する
@@ -1724,22 +1755,6 @@ export async function processIntercomWebhook(payload) {
     } else {
       await replyToConversation(event.intercom_conversation_id, replyMessage, conciergeAdminId);
       logger.info("reply success", { reply_source: replySource, admin_id: conciergeAdminId, ...ctx });
-    }
-
-    // bot 返信をメッセージ履歴に保存（会話履歴の両方向化）
-    try {
-      const botMsgOrder = (await countMessagesBySessionUid(sessionUid)) + 1;
-      await createMessage({
-        sessionUid,
-        messageId: `bot-${event.intercom_message_id}`,
-        role: "bot",
-        messageText: replyMessage,
-        messageOrder: botMsgOrder,
-        createdAtTs: new Date().toISOString(),
-        rawPayloadJson: null
-      });
-    } catch (err) {
-      logger.warn("bot message save failed (non-fatal)", { sessionUid, error: err?.message, ...ctx });
     }
 
     // handoff reply 成功 → handed_off に遷移

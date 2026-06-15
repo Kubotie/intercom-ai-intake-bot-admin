@@ -269,7 +269,12 @@ const SUPPORTED_CATEGORIES = new Set([
   "tracking_issue",
   "login_account",
   "billing_contract",
-  "general_inquiry"
+  "general_inquiry",
+  "report_difference",
+  "ab_test_experience",
+  "heatmap_analytics",
+  "popup_event",
+  "customization_integration"
 ]);
 
 /**

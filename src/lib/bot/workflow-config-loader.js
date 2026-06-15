@@ -122,18 +122,21 @@ export async function getNlPolicyInstruction() {
 
 /**
  * 有効なカテゴリキーのリストを返す。
- * intents_config_json に設定がある場合はそれを使用。
- * 設定がない場合は categories.js の CATEGORY_LIST にフォールバック。
+ * categories.js の CATEGORY_LIST をベースとし、ワークフローで enabled:false に
+ * 設定されたカテゴリのみ除外する。ワークフロー未設定のカテゴリは有効とみなす。
+ * (以前: ワークフローに定義されたカテゴリのみ返す → 未定義カテゴリが usage_guidance に集約されるバグ)
  * @returns {Promise<string[]>}
  */
 export async function getCategoryList() {
+  const { CATEGORY_LIST } = await import("./categories.js");
   const cached = await fetchAndCacheConfig();
   const intents = cached?.intentsConfig?.intents;
   if (!intents || Object.keys(intents).length === 0) {
-    const { CATEGORY_LIST } = await import("./categories.js");
     return CATEGORY_LIST;
   }
-  return Object.keys(intents).filter(k => intents[k]?.enabled !== false);
+  // ワークフローで enabled:false が明示されたカテゴリのみ除外する。
+  // ワークフローに定義されていないカテゴリは有効とみなして CATEGORY_LIST から含める。
+  return CATEGORY_LIST.filter(k => intents[k]?.enabled !== false);
 }
 
 export function invalidateWorkflowConfigCache() {

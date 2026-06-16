@@ -907,7 +907,10 @@ export async function processIntercomWebhook(payload) {
   }
 
   // learn: FAQへ即答するため症状スロット収集をスキップするフラグ
-  const isLearnIntent        = actionIntent === "learn";
+  // verify + KNOWLEDGE_FIRST_CATEGORIES: 「〜可能ですか」「〜できますか」系の機能確認質問も
+  // スロット収集をスキップしてスキル優先にする（スロット質問ループを防ぐ）
+  const isLearnIntent        = actionIntent === "learn" ||
+    (actionIntent === "verify" && KNOWLEDGE_FIRST_CATEGORIES.has(session.category));
   const isTroubleshootIntent = actionIntent === "troubleshoot";
 
   // Agentic Slot Loop の結果 (troubleshoot intent 時に Step 9 で設定)

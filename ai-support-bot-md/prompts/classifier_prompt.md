@@ -47,7 +47,7 @@ billing_contract > login_account > experience_issue > tracking_issue > bug_repor
 ユーザーがそのトピックに対して「何をしたいか」を以下の4値から1つ選ぶこと。
 
 - **troubleshoot**: 何かが動かない・エラーが出る・期待通りに動作しない状況を「直したい」。「〜できない」「〜が出ない」「〜がおかしい」。
-- **learn**: 使い方・設定手順・機能の場所を「知りたい」。「〜はどうやるか」「〜はどこですか」「〜できますか（可否確認）」。
+- **learn**: 使い方・設定手順・機能の場所・機能の可否を「知りたい」。「〜はどうやるか」「〜はどこですか」「〜できますか」「〜可能ですか」「〜機能はありますか/ありますでしょうか」。現在何かが壊れているわけではなく、機能・操作を照会している場合はすべて learn。
 - **verify**: 現在の数値・設定・状態が「正しいか確認したい」。「〜と差異がある」「〜と一致しない」「〜は合っていますか」。
 - **request**: プラン変更・解約・機能要望など「何かを変更・依頼したい」。「〜したい」「〜をお願いしたい」。
 
@@ -55,6 +55,7 @@ billing_contract > login_account > experience_issue > tracking_issue > bug_repor
 
 - `troubleshoot` vs `learn`: 「今まさに動かない」は troubleshoot。「やり方を知りたい」は learn。
 - `troubleshoot` vs `verify`: 症状がある（動かない）は troubleshoot。数値のずれを確認したいだけは verify。
+- `learn` vs `verify`: 「〜可能ですか」「〜ありますか」「〜できますか」は **learn**（機能照会）。「〜と差異がある」「〜は正しいですか」「〜と一致しない」は verify（現状確認）。
 - `billing_contract` は原則 `request`（解約・変更の意思表明）。請求内容の確認だけなら `verify`。
 - `login_account` は原則 `troubleshoot`（ログインできない状態）。
 
@@ -167,6 +168,36 @@ billing_contract > login_account > experience_issue > tracking_issue > bug_repor
   "reason": "PtengineとGA4の数値差異の確認→report_difference。「どちらが正しいか」→verify"
 }
 ```
+
+**例8（usage_guidance：機能の可否確認 → learn）**
+入力: 「CTAボタンがタップされた際に、遷移先URLにパラメータを付与することは可能ですか？」
+```json
+{
+  "category": "usage_guidance",
+  "action_intent": "learn",
+  "urgency": "normal",
+  "sentiment": "neutral",
+  "confidence": 0.90,
+  "reason": "機能の可否・やり方を知りたい→learn。「可能ですか」は現在何か壊れているわけではなく機能確認"
+}
+```
+
+**例9（usage_guidance：機能の存在確認 → learn）**
+入力: 「ABテストではなく単純にページ編集をする機能はありますでしょうか？」
+```json
+{
+  "category": "usage_guidance",
+  "action_intent": "learn",
+  "urgency": "normal",
+  "sentiment": "neutral",
+  "confidence": 0.91,
+  "reason": "機能の存在を確認したい→learn。「ありますでしょうか」は機能照会であり数値差異確認（verify）ではない"
+}
+```
+
+**例8・9 の判定ポイント（verify との境界）**:
+- 「可能ですか」「できますか」「ありますか/ありますでしょうか」「どこにありますか」→ **learn**（機能・操作の照会）
+- 「正しいですか」「合っていますか」「〜と差異がありますが」「なぜ違うのか」→ **verify**（現状の確認・数値の照合）
 
 ---
 

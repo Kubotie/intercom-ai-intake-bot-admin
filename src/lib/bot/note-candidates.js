@@ -1,13 +1,9 @@
 // ─────────────────────────────────────────────
-// note-candidates (確信度ベース分岐版)
+// note-candidates (質問方向性ベース版)
 //
-// 以下の順で確信度を評価し、不確実な軸でだけ分岐する:
-//   interpretation_confident + skill_confident → content で分岐
-//   interpretation_confident のみ              → skill で分岐
-//   どちらも不確実                              → interpretation で分岐
-//
-// さらに最良候補の回答品質が低いと判断された場合、
-// 意図を再解釈した候補を追加する (is_reinterpretation: true)。
+// 顧客の質問から考えられる「質問の方向性」を 1〜3 個 LLM に検討させ、
+// 各方向性ごとに複数の FAQ / Help Center チャンクを参照して
+// 統合された最適回答を生成する。
 // ─────────────────────────────────────────────
 
 import { config } from "./config.js";
@@ -15,16 +11,19 @@ import { retrieveKnowledgeCandidates, filterExposable } from "./knowledge/retrie
 
 /**
  * @typedef {{
+ *   title: string,
+ *   url?: string,
+ *   skill: "FAQ" | "Help Center"
+ * }} CandidateSource
+ *
+ * @typedef {{
  *   interpretation: string,
- *   skill: string,
- *   source_title: string,
- *   source_url?: string,
- *   answer: string,
- *   is_reinterpretation?: boolean
+ *   sources: CandidateSource[],
+ *   answer: string
  * }} AnswerCandidate
  *
  * @typedef {{
- *   branchAxis: "content" | "skill" | "interpretation",
+ *   branchAxis: "interpretation",
  *   branchReason: string,
  *   candidates: AnswerCandidate[]
  * }} CandidateResult
@@ -49,19 +48,19 @@ export async function generateAnswerCandidatesForNote({ category, latestUserMess
       latestUserMessage,
       collectedSlots,
       allowedSourceTypes: ["notion_faq"],
-      limit: 5,
+      limit: 6,
     }),
     retrieveKnowledgeCandidates({
       category,
       latestUserMessage,
       collectedSlots,
       allowedSourceTypes: ["help_center"],
-      limit: 5,
+      limit: 6,
     }),
   ]);
 
-  const faqChunks = filterExposable(faqResult.status === "fulfilled" ? faqResult.value : []).slice(0, 4);
-  const hcChunks  = filterExposable(hcResult.status  === "fulfilled" ? hcResult.value  : []).slice(0, 4);
+  const faqChunks = filterExposable(faqResult.status === "fulfilled" ? faqResult.value : []).slice(0, 6);
+  const hcChunks  = filterExposable(hcResult.status  === "fulfilled" ? hcResult.value  : []).slice(0, 6);
 
   if (faqChunks.length === 0 && hcChunks.length === 0) return null;
 
@@ -85,44 +84,38 @@ export async function generateAnswerCandidatesForNote({ category, latestUserMess
   const userQuery = [latestUserMessage, slotContext].filter(Boolean).join(" / ");
 
   const systemPrompt = `あなたはPtengineのカスタマーサポートアドバイザーです。
-サポート担当者が「どの解釈・スキル・コンテンツが正しいか」を判断できるよう、
-確信度ベースで最適な分岐軸を選び、候補を生成してください。
+サポート担当者が「この顧客にどんな方向性で回答すべきか」を判断できるよう、
+顧客の質問から考えられる「質問の方向性」を 1〜3 個抽出し、
+各方向性ごとに**複数の FAQ / Help Center チャンクを統合**して最適解を生成してください。
 
 ## 事前判定（最優先）
-顧客の会話全体を読み、実質的な質問・課題・依頼が含まれているかを自然言語として判断してください。
+顧客の会話全体を読み、実質的な質問・課題・依頼が含まれているかを判断してください。
 挨拶のみ、感謝のみ、「解決しました」等の解決報告のみ、相づちのみ、
 締め言葉のみなど、実際の問い合わせ内容を含まない場合は:
   message_type を "non_substantive" に設定し、candidates を空配列で返してください。
-実質的な問い合わせを含む場合は message_type を "substantive" に設定し、
-以降の Step を続けてください。
+実質的な問い合わせを含む場合は message_type を "substantive" に設定し、以降の Step を続けてください。
 
-## Step 1: 確信度の評価（substantive のみ）
-以下を boolean で評価してください:
-- interpretation_confident: 質問の意図が一通りに絞れるか
-- skill_confident: 使用すべきスキル（FAQ/Help Center）が明確か
+## Step 1: 質問の方向性の抽出（1〜3 個）
+顧客の質問から、対応すべき「質問の方向性」を意味的に独立した形で 1〜3 個抽出してください。
+- 解釈が一通りに絞れて成立する方向性が 1 つだけなら 1 候補のみで返すこと（無理に候補を増やさない）
+- 別解釈・別の側面で問い合わせの可能性がある場合は 2〜3 候補
+- 同じ方向性の言い換えで複数生成しないこと（候補同士は意味的に明確に異なること）
 
-## Step 2: 分岐軸の選択
-評価結果に基づき branch_axis を選択:
-- 両方 true  → "content"        （解釈もスキルも固い。参照コンテンツで分岐）
-- 解釈のみ true → "skill"       （解釈は固い。どのスキルが最適か分岐）
-- 解釈が false  → "interpretation"（質問の意図から分岐）
-
-## Step 3: 候補生成
-選択した branch_axis に沿って最大3候補を生成してください。
-- content 分岐: interpretation と skill は統一し、source_title を変える
-- skill 分岐:   interpretation は統一し、skill と source_title を変える
-- interpretation 分岐: interpretation・skill・source_title すべてを変える
-
-## Step 4: 回答品質チェック
-最良候補でも回答が曖昧・情報不足と判断される場合、
-意図の再解釈候補を1件追加してください (is_reinterpretation: true)。
+## Step 2: 各方向性の最適回答の合成
+各方向性について:
+- 提供された FAQ / Help Center チャンクの中から、その方向性に関連する**複数のチャンク**を選び出す
+- 必要に応じて FAQ と Help Center をまたいで参照する
+- 選んだチャンクの情報を統合し、顧客向けの最適な回答文を作る
+- 単一チャンクで十分カバーできる場合は 1 件参照でも構わない
+- 関連しない情報は混ぜないこと
+- sources 配列に参照したチャンクのタイトル・URL（あれば）・スキル区分（FAQ または Help Center）を全て列挙
 
 ## 回答文ルール
 - 冒頭は「お世話になっております。」で始める
 - 顧客名は「${customerLabel}」
 - 社内情報・担当者名は含めない
-- 各 answer は400文字以内
-- 参照ナレッジにURLが含まれる場合は、そのURLをそのまま末尾に「詳細はこちら: https://...」と記載する（[URL] というプレースホルダーは絶対に使わない。URLがない場合はリンク行自体を省略する）
+- 各 answer は 500 文字以内
+- 参照ナレッジに URL が含まれる場合は、回答末尾に URL を「詳細はこちら: https://...」で記載する（[URL] というプレースホルダーは絶対に使わない。URL がない場合はリンク行自体を省略する）
 
 ## カテゴリ集中ルール（重要）
 - 回答は必ずカテゴリ「${category}」に直接関連する情報のみ使用すること
@@ -132,23 +125,19 @@ export async function generateAnswerCandidatesForNote({ category, latestUserMess
 ## ハルシネーション防止ルール（最重要）
 - 提供されたナレッジに明示されていない情報は一切含めない
 - 推測・補完・一般論の補足は禁止
-- 確信を持って回答できない場合は answer を「提供情報だけでは判断できません。担当者にて詳細をご確認ください。」のみにして source_title をそのタイトルにすること
+- 確信を持って回答できない場合は answer を「提供情報だけでは判断できません。担当者にて詳細をご確認ください。」のみにして sources を空配列にすること
 
 ## 返却形式（JSONのみ）
 {
   "message_type": "substantive" | "non_substantive",
-  "interpretation_confident": true,
-  "skill_confident": true,
-  "branch_axis": "content" | "skill" | "interpretation",
-  "branch_reason": "分岐理由（30文字以内）",
+  "branch_reason": "1〜3つの方向性を選定した理由（30文字以内）",
   "candidates": [
     {
-      "interpretation": "意図の解釈（20文字以内）",
-      "skill": "FAQ" | "Help Center" | "事例マッチング",
-      "source_title": "参照コンテンツのタイトル",
-      "source_url": "URLまたは空文字",
-      "answer": "顧客向け回答文（400文字以内）",
-      "is_reinterpretation": false
+      "interpretation": "質問の方向性（30文字以内）",
+      "sources": [
+        { "title": "FAQタイトル", "url": "URLまたは空文字", "skill": "FAQ" | "Help Center" }
+      ],
+      "answer": "顧客向け回答文（500文字以内、複数sourceの情報を統合）"
     }
   ]
 }`;
@@ -190,13 +179,26 @@ export async function generateAnswerCandidatesForNote({ category, latestUserMess
     if (parsed?.message_type === "non_substantive") return null;
 
     const candidates = Array.isArray(parsed?.candidates)
-      ? parsed.candidates.filter(c => c?.interpretation && c?.skill && c?.answer).slice(0, 4)
+      ? parsed.candidates
+          .filter(c => c?.interpretation && c?.answer && Array.isArray(c?.sources))
+          .map(c => ({
+            interpretation: String(c.interpretation),
+            sources: c.sources
+              .filter(s => s?.title)
+              .map(s => ({
+                title: String(s.title),
+                url:   s.url ? String(s.url) : "",
+                skill: s.skill === "Help Center" ? "Help Center" : "FAQ",
+              })),
+            answer: String(c.answer),
+          }))
+          .slice(0, 3)
       : [];
 
     if (candidates.length === 0) return null;
 
     return {
-      branchAxis:   parsed.branch_axis   || "content",
+      branchAxis:   "interpretation",
       branchReason: parsed.branch_reason || "",
       candidates,
     };

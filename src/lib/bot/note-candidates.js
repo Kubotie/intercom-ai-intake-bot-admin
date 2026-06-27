@@ -88,12 +88,34 @@ export async function generateAnswerCandidatesForNote({ category, latestUserMess
 顧客の質問から考えられる「質問の方向性」を 1〜3 個抽出し、
 各方向性ごとに**複数の FAQ / Help Center チャンクを統合**して最適解を生成してください。
 
-## 事前判定（最優先）
-顧客の会話全体を読み、実質的な質問・課題・依頼が含まれているかを判断してください。
+## 事前判定（最優先）— message_type は以下 4 種から 1 つだけ選ぶ
+
+### "non_substantive"（候補生成しない）
 挨拶のみ、感謝のみ、「解決しました」等の解決報告のみ、相づちのみ、
-締め言葉のみなど、実際の問い合わせ内容を含まない場合は:
-  message_type を "non_substantive" に設定し、candidates を空配列で返してください。
-実質的な問い合わせを含む場合は message_type を "substantive" に設定し、以降の Step を続けてください。
+締め言葉のみなど、実際の問い合わせ内容を含まない場合。
+
+### "vague_support_request"（候補生成しない）
+顧客が「サポートいただけますか」「教えてください」「お時間ありますか」「ご相談させてください」のように、
+**助けを求める意思表示はあるが具体的に何を相談したいかが特定できない**場合。
+特に以下に該当：
+- 機能名・症状・エラー内容・目的のいずれも明示されていない
+- 「設定の件で」など対象領域が曖昧で、何の設定かが特定できない
+- 自己紹介・前置きが大半で、本題が未提示
+このような状態でナレッジを当てはめると顧客の意図と無関係な FAQ を提示してしまうため、
+**必ず candidates を空配列で返すこと**。
+
+### "agent_action_required"（候補生成しない）
+顧客がエージェントに対し**顧客固有データの個別調査・確認・操作**を依頼している場合。
+特徴：
+- 顧客自身の URL・体験名・イベント名・プロジェクト名・契約内容など固有情報が含まれる
+- 「ご確認ください」「確認していただけますか」「見ていただけますか」「調査してください」等
+- FAQ や Help Center の一般知識では応答できず、エージェントが実際に Ptengine 画面や契約情報を見る必要がある
+このケースで一般的な FAQ を提示すると的外れになるため、**必ず candidates を空配列で返すこと**。
+（「使い方を教えてください」「機能はありますか」のような一般質問は agent_action_required ではなく substantive）
+
+### "substantive"（候補生成する）
+上記 3 種いずれにも該当せず、FAQ または Help Center の知識で具体的に回答可能な質問・相談を含む場合のみ、
+以降の Step を続けて candidates を生成してください。
 
 ## Step 1: 質問の方向性の抽出（1〜3 個）
 顧客の質問から、対応すべき「質問の方向性」を意味的に独立した形で 1〜3 個抽出してください。
@@ -129,8 +151,8 @@ export async function generateAnswerCandidatesForNote({ category, latestUserMess
 
 ## 返却形式（JSONのみ）
 {
-  "message_type": "substantive" | "non_substantive",
-  "branch_reason": "1〜3つの方向性を選定した理由（30文字以内）",
+  "message_type": "substantive" | "non_substantive" | "vague_support_request" | "agent_action_required",
+  "branch_reason": "1〜3つの方向性を選定した理由（30文字以内）。substantive 以外の場合は判定理由",
   "candidates": [
     {
       "interpretation": "質問の方向性（30文字以内）",
@@ -140,7 +162,8 @@ export async function generateAnswerCandidatesForNote({ category, latestUserMess
       "answer": "顧客向け回答文（500文字以内、複数sourceの情報を統合）"
     }
   ]
-}`;
+}
+※ substantive 以外の場合は candidates を必ず空配列 [] にすること。`;
 
   try {
     const res = await fetch(`${config.llm.baseUrl}/chat/completions`, {
@@ -176,7 +199,13 @@ export async function generateAnswerCandidatesForNote({ category, latestUserMess
       else return null;
     }
 
-    if (parsed?.message_type === "non_substantive") return null;
+    // substantive 以外は候補生成しない（候補の質を担保するためのガード）
+    const NON_CANDIDATE_TYPES = new Set([
+      "non_substantive",
+      "vague_support_request",
+      "agent_action_required",
+    ]);
+    if (NON_CANDIDATE_TYPES.has(parsed?.message_type)) return null;
 
     const candidates = Array.isArray(parsed?.candidates)
       ? parsed.candidates

@@ -42,6 +42,15 @@ export async function createMessage({ sessionUid, messageId, role, messageText, 
   return createRecord(config.nocodb.tables.messages, buildMessageInsert({ sessionUid, messageId, role, messageText, messageOrder, createdAtTs, rawPayloadJson }));
 }
 
+/**
+ * NocoDB の UNIQUE 制約違反エラーかを判定する。
+ * HTTP 422 かつ "duplicate" または "unique" を含む場合に true を返す。
+ */
+export function isDuplicateKeyError(err) {
+  const msg = String(err?.message ?? "").toLowerCase();
+  return msg.includes("422") && (msg.includes("duplicate") || msg.includes("unique"));
+}
+
 export async function listSlotsBySessionUid(sessionUid) {
   const data = await listRecords(config.nocodb.tables.slots, { where: whereEq("session_uid", sessionUid), limit: 1000 });
   return unwrapList(data);
@@ -101,6 +110,59 @@ export async function listMessagesBySessionUid(sessionUid, limit = 10) {
   return unwrapList(data);
 }
 
+// ── feedback ──────────────────────────────────────────────────────────────────
+
+export async function createFeedback({ sessionUid, conversationId, adminId, feedbackText, originalUserMessage, aiResponseSnapshot, category, replySource, notePartId }) {
+  if (!config.nocodb.tables.feedback) return null;
+  return createRecord(config.nocodb.tables.feedback, {
+    session_uid:             sessionUid    || null,
+    intercom_conversation_id: conversationId,
+    admin_id:                adminId       || null,
+    feedback_text:           feedbackText,
+    original_user_message:   originalUserMessage  || null,
+    ai_response_snapshot:    aiResponseSnapshot   || null,
+    category:                category      || null,
+    reply_source:            replySource   || null,
+    note_part_id:            notePartId    || null,
+    status:                  "pending",
+  });
+}
+
+export async function findFeedbackByNotePartId(notePartId) {
+  if (!config.nocodb.tables.feedback || !notePartId) return null;
+  const data = await listRecords(config.nocodb.tables.feedback, {
+    where: whereEq("note_part_id", notePartId),
+    limit: 1,
+  });
+  return unwrapList(data)[0] || null;
+}
+
+export async function listFeedback({ status = null, limit = 200 } = {}) {
+  if (!config.nocodb.tables.feedback) return [];
+  const where = status ? `(status,eq,${status})` : undefined;
+  const data = await listRecords(config.nocodb.tables.feedback, {
+    ...(where ? { where } : {}),
+    sort: "-CreatedAt",
+    limit,
+  });
+  return unwrapList(data);
+}
+
+export async function updateFeedbackStatus(rowId, status, improvementNotes = null) {
+  const patch = { status, applied_at: new Date().toISOString() };
+  if (improvementNotes) patch.improvement_notes = improvementNotes;
+  return updateRecord(config.nocodb.tables.feedback, rowId, patch);
+}
+
+export async function listFeedbackByStatuses(statuses, limit = 200) {
+  if (!config.nocodb.tables.feedback) return [];
+  const where = statuses.length === 1
+    ? `(status,eq,${statuses[0]})`
+    : `(${statuses.map(s => `(status,eq,${s})`).join(",")})`;
+  const data = await listRecords(config.nocodb.tables.feedback, { where, sort: "-CreatedAt", limit });
+  return unwrapList(data);
+}
+
 export async function getActiveWorkflow() {
   if (!config.nocodb.tables.workflows) return null;
   const data = await listRecords(config.nocodb.tables.workflows, {
@@ -109,3 +171,24 @@ export async function getActiveWorkflow() {
   });
   return unwrapList(data)[0] || null;
 }
+
+// ── completion check ──────────────────────────────────────────────────────────
+//
+// 完了判定で「未完了」と判定されたセッションは completion_status=awaiting_completion
+// で待機し、cron が定期的に再判定する。
+
+/**
+ * cron 用: 次回判定時刻を過ぎた awaiting_completion セッションを取得する。
+ */
+export async function listPendingCompletionSessions({ limit = 20, now = new Date() } = {}) {
+  if (!config.nocodb.tables.sessions) return [];
+  const nowIso = now.toISOString();
+  // NocoDB v2 の date comparison は ISO 文字列で lte が使える
+  const data = await listRecords(config.nocodb.tables.sessions, {
+    where: `(completion_status,eq,awaiting_completion)~and(next_completion_check_at,le,${nowIso})`,
+    sort: "next_completion_check_at",
+    limit
+  });
+  return unwrapList(data);
+}
+

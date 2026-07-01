@@ -31,6 +31,7 @@ import { resolveExecutionProfile } from "./concierge-profiles.js";
 import { enrichContactFromUrl } from "./project-enrichment.js";
 import { runAgenticTroubleshootLoop } from "./agentic-slot-loop.js";
 import { generateAnswerCandidatesForNote } from "./note-candidates.js";
+import { checkMessageCompleteness } from "./completion-check.js";
 
 // ─────────────────────────────────────────────
 // self-reply loop prevention (2段構え)
@@ -503,7 +504,7 @@ async function runNextQuestionGeneration(sessionUid, session, latestUserMessage,
   };
 }
 
-export async function processIntercomWebhook(payload) {
+export async function processIntercomWebhook(payload, { skipCompletionCheck = false } = {}) {
   // ── 1. extract ──────────────────────────────
   const event = extractIntercomEvent(payload);
 
@@ -783,6 +784,98 @@ export async function processIntercomWebhook(payload) {
       }
     } catch (err) {
       logger.warn("conversation history retrieval failed (non-fatal)", { sessionUid, error: err?.message, ...ctx });
+    }
+  }
+
+  // ── 6.7. 完了判定 (Layer 1) ─────────────────────────────────
+  // 顧客のメッセージが完結しているか LLM で判定する。
+  // 未完了なら 3 分待機して再判定し、それでも empty なら cron 監視に委ねる。
+  // skipCompletionCheck=true は cron からの再入時のみ true。
+  if (!skipCompletionCheck && event.latest_user_message) {
+    const initial = await checkMessageCompleteness({
+      latestUserMessage: event.latest_user_message,
+      conversationHistorySummary,
+    });
+    logger.info("completion check (initial)", {
+      session_uid: sessionUid,
+      status: initial.status,
+      reason: initial.reason,
+      ...ctx
+    });
+
+    if (initial.status === "incomplete_with_progress" || initial.status === "incomplete_empty") {
+      // Layer 1: 3 分待って続き入力を待つ
+      const LAYER1_WAIT_MS = 3 * 60 * 1000;
+      logger.info("completion check: waiting for continuation (Layer 1)", {
+        session_uid: sessionUid, wait_ms: LAYER1_WAIT_MS, ...ctx
+      });
+      await new Promise(r => setTimeout(r, LAYER1_WAIT_MS));
+
+      // 新メッセージが到着していれば yield（新ターンに譲る）
+      const sessionMsgs = await listMessagesBySessionUid(sessionUid, 30);
+      const userMsgs = sessionMsgs.filter(m => m.role === "user")
+        .sort((a, b) => (a.message_order ?? 0) - (b.message_order ?? 0));
+      const latestUserMsg = userMsgs[userMsgs.length - 1];
+      if (latestUserMsg?.intercom_message_id !== event.intercom_message_id) {
+        logger.info("completion check: yielding to newer message after Layer 1 wait", {
+          session_uid: sessionUid, ...ctx
+        });
+        return;
+      }
+
+      // 直近 bot 返信以降のユーザーメッセージ群を結合
+      const botOrders = sessionMsgs.filter(m => m.role === "bot").map(m => m.message_order ?? 0);
+      const lastBotOrder = botOrders.length > 0 ? Math.max(...botOrders) : 0;
+      const batchMsgs = userMsgs.filter(m => (m.message_order ?? 0) > lastBotOrder);
+      if (batchMsgs.length > 1) {
+        event.latest_user_message = batchMsgs
+          .map(m => String(m.message_text ?? "").trim())
+          .filter(Boolean)
+          .join("\n");
+      }
+
+      const second = await checkMessageCompleteness({
+        latestUserMessage: event.latest_user_message,
+        conversationHistorySummary,
+      });
+      logger.info("completion check (after Layer 1)", {
+        session_uid: sessionUid,
+        status: second.status,
+        reason: second.reason,
+        ...ctx
+      });
+
+      if (second.status === "incomplete_empty") {
+        // 内容ほぼゼロ → cron 監視に委ねる（次回判定+10分）
+        const nextCheckAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+        await updateSession(sessionRowId, {
+          observabilityFields: {
+            completion_status: "awaiting_completion",
+            completion_check_count: 0,
+            next_completion_check_at: nextCheckAt,
+            completion_check_reason: second.reason,
+          }
+        }).catch(err => logger.warn("completion state save failed", { error: err?.message, ...ctx }));
+        logger.info("completion check: escalating to cron monitoring", {
+          session_uid: sessionUid,
+          next_check_at: nextCheckAt,
+          ...ctx
+        });
+        return;
+      }
+      // incomplete_with_progress / complete / possibly_complete → 保守的に処理継続
+    }
+
+    // 前ターンで awaiting だった場合はリセット
+    if (session.completion_status === "awaiting_completion") {
+      await updateSession(sessionRowId, {
+        observabilityFields: {
+          completion_status: "ready",
+          completion_check_count: 0,
+          next_completion_check_at: null,
+          completion_check_reason: null,
+        }
+      }).catch(() => {});
     }
   }
 

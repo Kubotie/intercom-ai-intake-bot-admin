@@ -1,6 +1,13 @@
 {
   "crons": [
-    { "path": "/api/cron/sync-notion-faq", "schedule": "0 2 * * *" },
-    { "path": "/api/cron/sync-help-center", "schedule": "0 3 * * *" }
-  ]
+    { "path": "/api/cron/sync-notion-faq",              "schedule": "0 2 * * *" },
+    { "path": "/api/cron/sync-help-center",             "schedule": "0 3 * * *" },
+    { "path": "/api/cron/feedback-report",              "schedule": "0 0 * * 1" },
+    { "path": "/api/cron/scan-feedback-notes",          "schedule": "0 2 * * *" },
+    { "path": "/api/cron/process-pending-completions",  "schedule": "*/5 * * * *" }
+  ],
+  "functions": {
+    "src/app/api/intercom/webhook/route.ts": { "maxDuration": 300 },
+    "src/app/api/cron/process-pending-completions/route.ts": { "maxDuration": 300 }
+  }
 }

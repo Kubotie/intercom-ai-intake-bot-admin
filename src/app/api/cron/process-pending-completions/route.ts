@@ -108,8 +108,8 @@ export async function GET(request: NextRequest) {
           endedCount++;
           logger.info("process-pending-completions: monitoring ended (still empty)", { session_uid: sessionUid });
         } else {
-          // もう一度 +10min 待機
-          const nextCheckAt = new Date(Date.now() + NEXT_WAIT_MS).toISOString();
+          // もう一度 +10min 待機 (NocoDB フィルタ互換のため "YYYY-MM-DD HH:mm:ss" で保存)
+          const nextCheckAt = new Date(Date.now() + NEXT_WAIT_MS).toISOString().slice(0, 19).replace("T", " ");
           await updateSession(rowId, {
             observabilityFields: {
               completion_check_count: currentCount + 1,

@@ -179,13 +179,16 @@ export async function getActiveWorkflow() {
 
 /**
  * cron 用: 次回判定時刻を過ぎた awaiting_completion セッションを取得する。
+ *
+ * NocoDB v2 は "T"区切り + ミリ秒 + "Z" 形式の ISO 文字列を受け付けないため、
+ * "YYYY-MM-DD HH:mm:ss" 形式に変換する。
  */
 export async function listPendingCompletionSessions({ limit = 20, now = new Date() } = {}) {
   if (!config.nocodb.tables.sessions) return [];
-  const nowIso = now.toISOString();
-  // NocoDB v2 の date comparison は ISO 文字列で lte が使える
+  // toISOString() → "2026-07-02T10:08:33.477Z" → "2026-07-02 10:08:33"
+  const nowStr = now.toISOString().slice(0, 19).replace("T", " ");
   const data = await listRecords(config.nocodb.tables.sessions, {
-    where: `(completion_status,eq,awaiting_completion)~and(next_completion_check_at,le,${nowIso})`,
+    where: `(completion_status,eq,awaiting_completion)~and(next_completion_check_at,le,${nowStr})`,
     sort: "next_completion_check_at",
     limit
   });

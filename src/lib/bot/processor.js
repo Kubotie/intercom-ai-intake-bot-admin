@@ -847,7 +847,8 @@ export async function processIntercomWebhook(payload, { skipCompletionCheck = fa
 
       if (second.status === "incomplete_empty") {
         // 内容ほぼゼロ → cron 監視に委ねる（次回判定+10分）
-        const nextCheckAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+        // NocoDB v2 のフィルタは "YYYY-MM-DD HH:mm:ss" 形式を要求するため統一
+        const nextCheckAt = new Date(Date.now() + 10 * 60 * 1000).toISOString().slice(0, 19).replace("T", " ");
         await updateSession(sessionRowId, {
           observabilityFields: {
             completion_status: "awaiting_completion",

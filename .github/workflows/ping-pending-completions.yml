@@ -1,0 +1,43 @@
+name: Ping process-pending-completions
+
+# Hobby プランは Vercel Cron が日次のみのため、GitHub Actions で 5 分ごとに
+# エンドポイントを叩いて Bot 返信保留セッションの再判定 cron を代替する。
+#
+# 前提:
+#   - GitHub Secrets に CRON_SECRET を登録（Vercel の CRON_SECRET と同じ値）
+#     Settings > Secrets and variables > Actions > New repository secret
+#
+# 注意:
+#   - GitHub Actions の schedule は 5 分刻みが最短
+#   - GitHub のインフラ都合で数分の遅延が発生する場合あり（許容範囲）
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: ping-pending-completions
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call process-pending-completions endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -eo pipefail
+          URL="https://intercom-ai-intake-bot-adminv1.vercel.app/api/cron/process-pending-completions"
+          HTTP_STATUS=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "$URL")
+          echo "HTTP $HTTP_STATUS"
+          cat /tmp/response.json
+          echo ""
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Non-200 response from endpoint"
+            exit 1
+          fi
